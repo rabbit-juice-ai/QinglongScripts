@@ -782,12 +782,18 @@ def main(argv=None):
         _env(name) for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")
     )
     webhook_url = _env("AGENTROUTER_WEBHOOK_URL")
+    webhook_ok = (
+        bool(webhook_url)
+        and webhook_url.lower().startswith(("http://", "https://"))
+        and not any(ch.isspace() for ch in webhook_url)
+    )
 
     lock = acquire_lock(data_dir)
     if lock is None:
         return 3
     try:
-        log(f"通知配置: Webhook {'已设置' if webhook_url else '未设置'}")
+        log(f"通知配置: Webhook "
+            f"{'已设置' if webhook_ok else ('格式异常（应为纯 URL）' if webhook_url else '未设置')}")
         log(f"代理配置: PROXY_URL={'已设置' if proxy_url else '未设置'}；"
             f"环境代理(HTTP(S)_PROXY)={'已设置' if env_proxy else '未设置'}")
         if args.mode == "site-connectivity":
