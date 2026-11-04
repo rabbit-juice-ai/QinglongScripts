@@ -41,14 +41,15 @@
 
 ---
 
-## ⚙️ 环境变量 | Environment Variables
+## ⚙️ AgentRouter-Checkin 环境变量 | Task Environment Variables
+
+> 💡 以下变量**仅属于 AgentRouter-Checkin 任务**（`tasks/agentrouter-checkin/`），用于该脚本的登录与通知。**本仓库本身不需要任何环境变量**；后续新增任务会各自声明所需变量。
 
 请在青龙面板的「环境变量」中配置：
 
 | 变量 | 必填 | 说明 |
 |:---|:---:|:---|
-| `AGENTROUTER_ACCOUNTS` | ✅ | 账号 JSON 数组，支持任意数量（1～20） |
-| `PROXY_URL` | ⬜ | 显式代理，例如 `http://192.168.31.29:37890`；留空时自动使用 `HTTPS_PROXY`/`HTTP_PROXY` |
+| `AGENTROUTER_ACCOUNTS` | ✅ | 账号 JSON 数组，支持任意数量（1～20） || `PROXY_URL` | ⬜ | 显式代理，例如 `http://192.168.31.29:37890`；留空时自动使用 `HTTPS_PROXY`/`HTTP_PROXY` |
 | `AGENTROUTER_WEBHOOK_URL` | ⬜ | 飞书自定义机器人 Webhook；未配置时仅用青龙 `notify.py` |
 | `AGENTROUTER_DATA_DIR` | ⬜ | 运行时数据目录，默认 `/ql/data/agentrouter-checkin` |
 | `AGENTROUTER_BASE_URL` | ⬜ | 站点地址，默认 `https://agentrouter.org` |
