@@ -27,88 +27,19 @@
 | **白名单** | 留空（拉取全部脚本） |
 | **黑名单** | 留空 |
 
-> 💡 本仓库脚本暂不含 `cron` 注释，订阅后不会自动创建定时任务；请在青龙「定时任务」中手动创建，命令见下方脚本说明。
+> 💡 本仓库脚本暂不含 `cron` 注释，订阅后不会自动创建定时任务；请在青龙「定时任务」中手动创建。
+>
+> ⚠️ 若仓库为私有，青龙无法匿名拉取（会提示 `could not read Username`）。请先将仓库设为公开，或手动上传脚本，详见各脚本的使用文档。
 
 ---
 
 ## 📜 脚本列表 | Script List
 
-| 脚本 | 功能 | 定时规则 | 说明 |
-|:---:|:---|:---:|:---|
-| 🎯 `agentrouter_checkin.py` | AgentRouter 多账号签到与余额汇总 | 手动配置（建议每天一次） | 单文件 Python，纯标准库；动态账号；飞书汇总；无数据库、无 Web |
+| 脚本 | 功能 | 定时规则 | 文档 |
+|:---:|:---|:---:|:---:|
+| 🎯 `agentrouter_checkin.py` | AgentRouter 多账号签到与余额汇总 | 手动配置（建议每天一次） | [使用文档](docs/agentrouter-checkin.md) |
 
-脚本路径：`tasks/agentrouter-checkin/agentrouter_checkin.py`
-
----
-
-## ⚙️ AgentRouter-Checkin 环境变量 | Task Environment Variables
-
-> 💡 以下变量**仅属于 AgentRouter-Checkin 任务**（`tasks/agentrouter-checkin/`），用于该脚本的登录与通知。**本仓库本身不需要任何环境变量**；后续新增任务会各自声明所需变量。
-
-请在青龙面板的「环境变量」中配置：
-
-| 变量 | 必填 | 说明 |
-|:---|:---:|:---|
-| `AGENTROUTER_ACCOUNTS` | ✅ | 账号 JSON 数组，支持任意数量（1～20） || `PROXY_URL` | ⬜ | 显式代理，例如 `http://192.168.31.29:37890`；留空时自动使用 `HTTPS_PROXY`/`HTTP_PROXY` |
-| `AGENTROUTER_WEBHOOK_URL` | ⬜ | 飞书自定义机器人 Webhook；未配置时仅用青龙 `notify.py` |
-| `AGENTROUTER_DATA_DIR` | ⬜ | 运行时数据目录，默认 `/ql/data/agentrouter-checkin` |
-| `AGENTROUTER_BASE_URL` | ⬜ | 站点地址，默认 `https://agentrouter.org` |
-
-### 账号配置示例
-
-```json
-[
-  {
-    "username": "你的登录用户名或邮箱",
-    "password": "你的密码",
-    "enabled": true,
-    "expected_name": "网站上的用户名（可选）"
-  }
-]
-```
-
-> 💡 `username` 同时是账号唯一标识；`expected_name` 可选，配置后启用严格身份对照（比对站点返回的 username/email），不配置则“登录成功即成功”。
-
-### 青龙任务命令
-
-```text
-cd /ql/data/scripts/<脚本所在目录> && python3 agentrouter_checkin.py --mode full
-```
-
-> 💡 建议任务超时 ≥ 35 分钟；如支持“不允许并发”请开启。首次部署先跑 `--mode dry-run`、`--mode site-connectivity`，再跑单账号验证。
-
----
-
-## 📣 通知推送 | Notifications
-
-所有账号执行结束后统一发送一条汇总，按以下顺序选择渠道：
-
-| 优先级 | 渠道 | 配置方式 | 说明 |
-|:---:|:---|:---|:---|
-| 1️⃣ | 青龙 `notify.py` | 青龙「通知设置」 | 存在且可用时优先使用 |
-| 2️⃣ | 飞书自定义机器人 | `AGENTROUTER_WEBHOOK_URL` | notify.py 不可用或明确失败时回退 |
-| — | 控制台/任务日志 | 无需配置 | 汇总始终打印到青龙任务日志 |
-
-> 💡 通知结果不确定时不自动重发；通知失败不影响签到结果。消息不含密码、Cookie、Token。
-
----
-
-## 📖 使用文档 | Documentation
-
-完整使用说明（配置、模式、退出码、常见问题、已知未验证行为）见：
-
-- [docs/agentrouter-checkin.md](docs/agentrouter-checkin.md)
-
-运行模式速查：
-
-| 模式 | 命令 | 说明 |
-|:---:|:---|:---|
-| 全量 | `--mode full` | 执行全部启用账号 |
-| 单账号 | `--mode single --account <username>` | 只执行指定账号 |
-| 配置校验 | `--mode dry-run` | 仅解析配置，不登录 |
-| 站点连通 | `--mode site-connectivity` | 仅请求 `/api/status` |
-| 飞书连通 | `--mode feishu-connectivity` | 发送测试消息 |
-| 会话诊断 | `--mode session-check --account <username>` | 用已保存 Cookie 检查会话，不登录 |
+> 💡 脚本路径：`tasks/agentrouter-checkin/agentrouter_checkin.py`；环境变量、任务命令、运行模式等均见对应文档。
 
 ---
 
@@ -139,4 +70,4 @@ QinglongScripts/
 
 ## 🤝 贡献 | Contributing
 
-欢迎提交 Issue 和 Pull Request。新增任务请放在 `tasks/<任务名>/` 下，并在本 README 的脚本列表与文档中登记。
+欢迎提交 Issue 和 Pull Request。新增任务请放在 `tasks/<任务名>/` 下，并在本 README 的脚本列表中登记脚本与文档链接。
