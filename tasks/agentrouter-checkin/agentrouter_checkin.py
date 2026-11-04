@@ -18,9 +18,11 @@
 """
 
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import http.cookiejar
+import io
 import json
 import os
 import re
@@ -215,8 +217,17 @@ class HttpClient:
             text = exc.read().decode("utf-8", "replace") if exc.fp else ""
             return ApiResponse(exc.code, _parse_json(text), text)
 
-    def get(self, path, omit_user_header=False):
-        return self._request("GET", path, omit_user_header=omit_user_header)
+    def get(self, path, omit_user_header=False, retries=2):
+        """GET 请求带有限重试（仅幂等请求；登录 POST 不重试）。"""
+        last_exc = None
+        for attempt in range(retries + 1):
+            try:
+                return self._request("GET", path, omit_user_header=omit_user_header)
+            except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
+                last_exc = exc
+                if attempt < retries:
+                    time.sleep(1.5 * (attempt + 1))
+        raise last_exc
 
     def post_json(self, path, payload):
         return self._request("POST", path, payload)
@@ -612,12 +623,26 @@ def _try_qinglong_notify(title, text):
         import notify  # type: ignore
     except Exception:
         return "unavailable"
+    buffer = io.StringIO()
     try:
-        notify.send(title, text)
-        return "success"
+        with contextlib.redirect_stdout(buffer):
+            notify.send(title, text)
     except Exception:
+        output = buffer.getvalue()
+        if output:
+            print(output, end="", flush=True)
         # 调用抛错时无法判定是否已实际发出，按"结果不确定"处理
         return "ambiguous"
+    output = buffer.getvalue()
+    if output:
+        print(output, end="", flush=True)
+    lowered = output.lower()
+    if any(
+        keyword in output or keyword in lowered
+        for keyword in ("无推送渠道", "请检查通知变量", "未配置", "not configured", "no push channel")
+    ):
+        return "definite_failure"
+    return "success"
 
 
 def _strip_title(text):
