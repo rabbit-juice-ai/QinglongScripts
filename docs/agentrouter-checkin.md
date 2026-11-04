@@ -35,7 +35,7 @@
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `AGENTROUTER_ACCOUNTS` | 是 | 账号 JSON 数组，见下方示例 |
-| `PROXY_URL` | 可选 | 直连不通时配置，例如 `http://192.168.31.29:37890`；留空则直连 |
+| `PROXY_URL` | 可选 | 显式代理，例如 `http://192.168.31.29:37890`；留空时自动使用标准环境变量 `HTTPS_PROXY`/`HTTP_PROXY`（青龙或容器级均可配置）；都没有则直连 |
 | `AGENTROUTER_WEBHOOK_URL` | 可选 | 飞书自定义机器人 Webhook；未配置时仅用青龙 notify.py |
 | `AGENTROUTER_DATA_DIR` | 可选 | 运行时数据目录，默认 `/ql/data/agentrouter-checkin` |
 | `AGENTROUTER_BASE_URL` | 可选 | 默认 `https://agentrouter.org`，一般不用改 |
@@ -148,6 +148,9 @@ data/
 - 日志不会输出密码、Cookie、Token。
 
 ## 9. 常见问题
+
+**Q：网络直连不通怎么办？**
+任选其一：配置 `PROXY_URL`，或在青龙/容器环境配置标准 `HTTPS_PROXY`/`HTTP_PROXY`（脚本会自动使用）。启动日志会显示 `代理配置: PROXY_URL=已设置/未设置；环境代理=已设置/未设置`，可据此确认。
 
 **Q：本地运行提示 `NOTIFY: 青龙 notify.py 不可用（本地运行属正常），使用 Webhook`？**
 本地没有青龙的 `notify.py`，属正常降级；随后应看到 `NOTIFY_OK: webhook`。到青龙环境后若 `notify.py` 可用则优先使用。

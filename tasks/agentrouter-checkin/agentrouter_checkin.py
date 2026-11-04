@@ -742,6 +742,9 @@ def main(argv=None):
     data_dir = _env("AGENTROUTER_DATA_DIR", DEFAULT_DATA_DIR) or DEFAULT_DATA_DIR
     base_url = _env("AGENTROUTER_BASE_URL", DEFAULT_BASE_URL) or DEFAULT_BASE_URL
     proxy_url = _env("PROXY_URL")
+    env_proxy = any(
+        _env(name) for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")
+    )
     webhook_url = _env("AGENTROUTER_WEBHOOK_URL")
 
     lock = acquire_lock(data_dir)
@@ -749,6 +752,8 @@ def main(argv=None):
         return 3
     try:
         log(f"通知配置: Webhook {'已设置' if webhook_url else '未设置'}")
+        log(f"代理配置: PROXY_URL={'已设置' if proxy_url else '未设置'}；"
+            f"环境代理(HTTP(S)_PROXY)={'已设置' if env_proxy else '未设置'}")
         if args.mode == "site-connectivity":
             client = HttpClient("site_connectivity", base_url, proxy_url, data_dir)
             resp = api_status(client)
