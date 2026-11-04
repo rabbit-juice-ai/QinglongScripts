@@ -653,6 +653,13 @@ def _strip_title(text):
 def _try_webhook(url, text, proxy_url):
     if not url:
         return "unavailable"
+    url = url.strip()
+    if (
+        not url.lower().startswith(("http://", "https://"))
+        or any(ch.isspace() for ch in url)
+    ):
+        log("FEISHU_FAILED: AGENTROUTER_WEBHOOK_URL 格式非法（只填写 https:// 开头的完整 URL，不要包含引号、换行或 export 等文本）")
+        return "definite_failure"
     payload = json.dumps({
         "msg_type": "text",
         "content": {"text": text},
@@ -661,9 +668,13 @@ def _try_webhook(url, text, proxy_url):
     if proxy_url:
         handlers.append(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
     opener = urllib.request.build_opener(*handlers)
-    request = urllib.request.Request(
-        url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    try:
+        request = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+        )
+    except ValueError:
+        log("FEISHU_FAILED: AGENTROUTER_WEBHOOK_URL 格式非法")
+        return "definite_failure"
     try:
         with opener.open(request, timeout=10) as resp:
             body = resp.read().decode("utf-8", "replace")
