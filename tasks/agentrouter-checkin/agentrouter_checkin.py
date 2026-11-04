@@ -628,7 +628,7 @@ def _exit_code(results):
 
 
 # ---------------------------------------------------------------------------
-# 通知（notify.py 优先；不可用/失败/不确定均尝试 Webhook；Webhook 不确定不重试）
+# 通知（Webhook 优先；未配置/失败/不确定均回退青龙 notify.py；不确定可能重复）
 # ---------------------------------------------------------------------------
 
 def _raise_timeout(signum, frame):
@@ -739,27 +739,27 @@ def _try_webhook(url, text, proxy_url):
 
 def notify_summary(text, proxy_url, webhook_url):
     body = _strip_title(text)
-    result = _try_qinglong_notify(TITLE, body)
-    if result == "success":
-        log("NOTIFY_OK: notify.py")
-        return "success"
-    if result == "ambiguous":
-        log("FEISHU_AMBIGUOUS: notify.py 结果不确定，仍尝试 Webhook（可能重复发送）")
-    elif result == "unavailable":
-        log("NOTIFY: 青龙 notify.py 不可用（本地运行属正常），使用 Webhook")
-    else:
-        log("NOTIFY_FALLBACK: notify.py 明确失败，尝试 Webhook")
     webhook_result = _try_webhook(webhook_url, text, proxy_url)
     if webhook_result == "success":
         log("NOTIFY_OK: webhook")
         return "success"
     if webhook_result == "ambiguous":
-        log("FEISHU_WEBHOOK_AMBIGUOUS: Webhook 结果不确定，不自动重试")
+        log("FEISHU_WEBHOOK_AMBIGUOUS: Webhook 结果不确定，尝试青龙 notify.py（可能重复发送）")
+    elif webhook_result == "unavailable":
+        log("NOTIFY: 未配置 Webhook，使用青龙 notify.py")
+    else:
+        log("FEISHU_FAILED: Webhook 明确失败，尝试青龙 notify.py")
+    qinglong_result = _try_qinglong_notify(TITLE, body)
+    if qinglong_result == "success":
+        log("NOTIFY_OK: notify.py")
+        return "success"
+    if qinglong_result == "ambiguous":
+        log("FEISHU_AMBIGUOUS: notify.py 结果不确定，不自动重试")
         return "ambiguous"
-    if webhook_result == "unavailable":
-        log("FEISHU_FAILED: 未配置 AGENTROUTER_WEBHOOK_URL")
+    if qinglong_result == "unavailable":
+        log("FEISHU_FAILED: 青龙 notify.py 不可用")
         return "failed"
-    log("FEISHU_FAILED: Webhook 明确失败")
+    log("FEISHU_FAILED: notify.py 明确失败")
     return "failed"
 
 

@@ -13,7 +13,7 @@
 - 使用网站用户名/邮箱 + 密码登录，登录可能触发当日签到（具体行为以站点为准）；
 - 登录后读取最新余额，计算本次运行内余额变化；
 - 单个账号失败不影响其他账号；
-- 全部结束后发送一条飞书汇总（优先青龙 `notify.py`，回退 Webhook）；
+- 全部结束后发送一条飞书汇总（优先 Webhook，回退青龙 `notify.py`）；
 - 遇到 Turnstile / 验证码 / MFA 不绕过，暂停该账号并记录原因。
 
 ## 2. 环境要求
@@ -108,7 +108,7 @@ cd /ql/data/scripts/<你的脚本目录> && python3 agentrouter_checkin.py --mod
    - 登录后重新获取用户信息，核对身份（配置了 `expected_name` 时严格比对）；
    - 读取签到后余额，计算变化（仅前后均成功时）；
 4. 打印每个账号结果与汇总到青龙任务日志；
-5. 发送一条飞书汇总；通知失败或结果不确定时尝试 Webhook；Webhook 结果不确定时只记录日志，不自动重试。
+5. 发送一条飞书汇总；优先 Webhook，未配置/失败/结果不确定时回退青龙 `notify.py`。
 
 ## 7. 结果与通知
 
@@ -116,7 +116,7 @@ cd /ql/data/scripts/<你的脚本目录> && python3 agentrouter_checkin.py --mod
 - 余额按 `/api/status` 的 `quota_per_unit` 换算为美元显示，并保留原始 quota，例如 `$499.98（249988608 quota）`；
 - 余额未知时显示“未知”，绝不显示为 0；
 - `checked_in` 只记录原始值：`true` 显示“含义待验证”，`false` 显示“不解释为已签到”；
-- 通知顺序：青龙 `notify.py` 明确成功即结束；不存在、明确失败或结果不确定时都会继续尝试 `AGENTROUTER_WEBHOOK_URL`（结果不确定时可能重复发送，优先保证送达）；Webhook 结果不确定时记录日志且不重试；
+- 通知顺序：优先 `AGENTROUTER_WEBHOOK_URL`（飞书）；未配置、明确失败或结果不确定时回退青龙 `notify.py`（结果不确定时可能重复发送，优先保证送达）；
 - 通知失败不影响签到结果。
 
 ### 退出码
@@ -152,8 +152,8 @@ data/
 **Q：网络直连不通怎么办？**
 任选其一：配置 `PROXY_URL`，或在青龙/容器环境配置标准 `HTTPS_PROXY`/`HTTP_PROXY`（脚本会自动使用）。启动日志会显示 `代理配置: PROXY_URL=已设置/未设置；环境代理=已设置/未设置`，可据此确认。
 
-**Q：本地运行提示 `NOTIFY: 青龙 notify.py 不可用（本地运行属正常），使用 Webhook`？**
-本地没有青龙的 `notify.py`，属正常降级；随后应看到 `NOTIFY_OK: webhook`。到青龙环境后若 `notify.py` 可用则优先使用。
+**Q：本地运行提示 `NOTIFY: 未配置 Webhook，使用青龙 notify.py`？**
+本地没有青龙的 `notify.py`，且未配置 `AGENTROUTER_WEBHOOK_URL` 时会出现；配置 Webhook 后会优先走 Webhook。青龙环境同理：Webhook 未配置或失败时才回退 `notify.py`。
 
 **Q：提示 `FEISHU_FAILED: 未配置 AGENTROUTER_WEBHOOK_URL`？**
 脚本运行进程没有读到该变量。注意 `VAR=value` 不会传给子进程，环境变量文件需写 `export VAR=...`，或使用 `set -a; source env文件; set +a`；每个新终端都要重新加载。
