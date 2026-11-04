@@ -10,11 +10,11 @@
 
 用法：
     python3 agentrouter_checkin.py --mode full
-    python3 agentrouter_checkin.py --mode single --account <id>
+    python3 agentrouter_checkin.py --mode single --account <username>
     python3 agentrouter_checkin.py --mode dry-run
     python3 agentrouter_checkin.py --mode site-connectivity
     python3 agentrouter_checkin.py --mode feishu-connectivity
-    python3 agentrouter_checkin.py --mode session-check --account <id>
+    python3 agentrouter_checkin.py --mode session-check --account <username>
 """
 
 import argparse
@@ -41,8 +41,7 @@ RUN_BUDGET_SECONDS = 30 * 60
 MIN_ACCOUNT_START_BUDGET_SECONDS = 240
 
 TITLE = "AgentRouter 每日签到与余额报告"
-ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-ALLOWED_FIELDS = {"id", "username", "password", "enabled", "expected_name"}
+ALLOWED_FIELDS = {"username", "password", "enabled", "expected_name"}
 HUMAN_VERIFY_KEYWORDS = (
     "turnstile", "captcha", "verify", "verification", "mfa", "otp",
     "验证码", "人机", "安全验证", "二次验证",
@@ -273,7 +272,7 @@ def load_accounts():
 
     errors = []
     accounts = []
-    seen_ids = {}
+    seen_usernames = {}
     for index, item in enumerate(data):
         prefix = f"第 {index + 1} 个账号"
         item_errors_before = len(errors)
@@ -283,23 +282,21 @@ def load_accounts():
         extra = set(item) - ALLOWED_FIELDS
         if extra:
             errors.append(f"{prefix}: 未知字段 {sorted(extra)}")
-        account_id = item.get("id")
         username = item.get("username")
         password = item.get("password")
         enabled = item.get("enabled")
         expected_name = item.get("expected_name")
 
-        if not isinstance(account_id, str) or not ID_RE.match(account_id):
-            errors.append(f"{prefix}: id 非法（需匹配 {ID_RE.pattern}）")
-        else:
-            if account_id in seen_ids:
-                errors.append(
-                    f"{prefix}: id 重复（与第 {seen_ids[account_id] + 1} 个账号冲突: {account_id}）"
-                )
-            else:
-                seen_ids[account_id] = index
         if not isinstance(username, str) or not username.strip():
             errors.append(f"{prefix}: username 为空或不是字符串")
+        else:
+            key = username.strip().casefold()
+            if key in seen_usernames:
+                errors.append(
+                    f"{prefix}: username 重复（与第 {seen_usernames[key] + 1} 个账号冲突）"
+                )
+            else:
+                seen_usernames[key] = index
         if not isinstance(password, str) or password == "":
             errors.append(f"{prefix}: password 为空或不是字符串")
         if not isinstance(enabled, bool):
@@ -309,10 +306,9 @@ def load_accounts():
         ):
             errors.append(f"{prefix}: expected_name 必须是非空字符串（可省略）")
 
-        if len(errors) == item_errors_before and isinstance(account_id, str):
+        if len(errors) == item_errors_before and isinstance(username, str):
             accounts.append({
-                "id": account_id,
-                "username": username,
+                "username": username.strip(),
                 "password": password,
                 "enabled": enabled,
                 "expected_name": expected_name.strip() if isinstance(expected_name, str) else None,
@@ -350,8 +346,8 @@ def _not_executed(account_id, reason):
 
 def process_account(account, base_url, proxy_url, data_dir):
     """处理单个账号；任何异常都收敛为该账号失败，不影响其他账号。"""
-    account_id = account["id"]
     username = account["username"]
+    account_id = username
     expected = account.get("expected_name")
     secrets = [username, account["password"]]
     if expected:
@@ -733,7 +729,7 @@ def _parse_args(argv):
         choices=["full", "single", "dry-run", "site-connectivity", "feishu-connectivity", "session-check"],
         help="执行模式，默认 full",
     )
-    parser.add_argument("--account", default=None, help="single 模式下的账号 id")
+    parser.add_argument("--account", default=None, help="single/session-check 模式下的账号 username")
     return parser.parse_args(argv)
 
 
@@ -767,8 +763,8 @@ def main(argv=None):
             return 0 if status == "success" else 2
 
         if args.mode == "session-check":
-            if not args.account or not ID_RE.match(args.account):
-                log("SESSION_CHECK_INVALID: 缺少或非法的 --account 参数")
+            if not args.account or not args.account.strip():
+                log("SESSION_CHECK_INVALID: 缺少或非法的 --account 参数（应为 username）")
                 return 2
             accounts, errors = load_accounts()
             if errors:
@@ -776,7 +772,8 @@ def main(argv=None):
                 for error in errors:
                     log(f"  - {error}")
                 return 2
-            target = next((a for a in accounts if a["id"] == args.account), None)
+            target_key = args.account.strip().casefold()
+            target = next((a for a in accounts if a["username"].casefold() == target_key), None)
             if target is None:
                 log(f"SESSION_CHECK_INVALID: 账号 {args.account} 不在配置中")
                 return 2
@@ -810,7 +807,7 @@ def main(argv=None):
 
         enabled = [account for account in accounts if account["enabled"]]
         log(f"启用账号数量: {len(enabled)}")
-        log("启用账号 id: " + (", ".join(a["id"] for a in enabled) if enabled else "无"))
+        log("启用账号: " + (", ".join(a["username"] for a in enabled) if enabled else "无"))
 
         if args.mode == "dry-run":
             log("DRY_RUN_OK: 配置解析通过，未启动登录")
@@ -824,7 +821,8 @@ def main(argv=None):
             if not args.account:
                 log("SINGLE_TARGET_INVALID: 缺少 --account 参数")
                 return 2
-            enabled = [a for a in enabled if a["id"] == args.account]
+            target_key = args.account.strip().casefold()
+            enabled = [a for a in enabled if a["username"].casefold() == target_key]
             if not enabled:
                 log(f"SINGLE_TARGET_INVALID: 账号 {args.account} 不存在或未启用")
                 return 2
@@ -835,7 +833,7 @@ def main(argv=None):
             remaining = RUN_BUDGET_SECONDS - (time.monotonic() - started)
             if remaining < MIN_ACCOUNT_START_BUDGET_SECONDS:
                 for rest in enabled[index:]:
-                    results.append(_not_executed(rest["id"], "RUN_BUDGET_EXHAUSTED"))
+                    results.append(_not_executed(rest["username"], "RUN_BUDGET_EXHAUSTED"))
                 break
             log(f"开始处理账号 {account['username']}")
             result = process_account(account, base_url, proxy_url, data_dir)

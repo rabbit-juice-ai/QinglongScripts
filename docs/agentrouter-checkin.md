@@ -35,7 +35,7 @@
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `AGENTROUTER_ACCOUNTS` | 是 | 账号 JSON 数组，见下方示例 |
-| `PROXY_URL` | 生产必填 | 例如 `http://192.168.31.29:37890` |
+| `PROXY_URL` | 可选 | 直连不通时配置，例如 `http://192.168.31.29:37890`；留空则直连 |
 | `AGENTROUTER_WEBHOOK_URL` | 可选 | 飞书自定义机器人 Webhook；未配置时仅用青龙 notify.py |
 | `AGENTROUTER_DATA_DIR` | 可选 | 运行时数据目录，默认 `/ql/data/agentrouter-checkin` |
 | `AGENTROUTER_BASE_URL` | 可选 | 默认 `https://agentrouter.org`，一般不用改 |
@@ -45,14 +45,12 @@
 ```json
 [
   {
-    "id": "account_a",
     "username": "你的登录用户名或邮箱",
     "password": "你的密码",
     "enabled": true,
     "expected_name": "网站上的用户名（可选）"
   },
   {
-    "id": "account_b",
     "username": "另一个账号",
     "password": "另一个密码",
     "enabled": true
@@ -64,13 +62,12 @@
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `id` | 是 | 本地唯一标识，`^[a-z0-9][a-z0-9_-]{0,63}$`，用于日志与锁 |
-| `username` | 是 | 登录用用户名或邮箱 |
+| `username` | 是 | 登录用用户名或邮箱；同时作为账号唯一标识（重复会被拒绝） |
 | `password` | 是 | 登录密码 |
 | `enabled` | 是 | `true` / `false`；禁用账号不执行 |
 | `expected_name` | 否 | 配置后启用严格身份对照：登录后以 `GET /api/user/self` 为准，比对返回的 `username` 或 `email`；不一致则该账号失败、余额不采用。不配置则“登录成功即成功”，名称差异仅提示 |
 
-校验规则：JSON 必须合法；数量 1～20；id 唯一；用户名/密码非空；未知字段报错。任何错误都会列出全部问题并以退出码 2 结束，不启动登录。
+校验规则：JSON 必须合法；数量 1～20；username 唯一（忽略大小写）；密码非空；未知字段报错。任何错误都会列出全部问题并以退出码 2 结束，不启动登录。
 
 ## 4. 青龙任务配置
 
@@ -92,11 +89,11 @@ cd /ql/data/scripts/<你的脚本目录> && python3 agentrouter_checkin.py --mod
 | 模式 | 命令 | 说明 |
 |---|---|---|
 | 全量 | `--mode full` | 按顺序执行全部启用账号 |
-| 单账号 | `--mode single --account <id>` | 只执行指定账号（必须存在且启用） |
+| 单账号 | `--mode single --account <username>` | 只执行指定账号（必须存在且启用） |
 | 配置校验 | `--mode dry-run` | 仅解析配置并打印待执行列表，不登录 |
 | 站点连通 | `--mode site-connectivity` | 仅请求 `/api/status`，不登录 |
 | 飞书连通 | `--mode feishu-connectivity` | 发送一条测试消息，不访问站点 |
-| 会话诊断 | `--mode session-check --account <id>` | 仅用已保存 Cookie 查询 `/api/user/self`，不登录；分别测试带/不带 `New-API-User` 头 |
+| 会话诊断 | `--mode session-check --account <username>` | 仅用已保存 Cookie 查询 `/api/user/self`，不登录；分别测试带/不带 `New-API-User` 头 |
 
 ## 6. 执行流程
 

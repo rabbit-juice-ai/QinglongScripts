@@ -168,7 +168,7 @@ def case(name):
 
 @case("1. 单账号成功（无旧会话）")
 def test_single_success():
-    accounts = [{"id": "account_a", "username": "user_secret_1", "password": "P@ss_SECRET_123", "enabled": True}]
+    accounts = [{"username": "user_secret_1", "password": "P@ss_SECRET_123", "enabled": True}]
     problems, _, captured = run_case(
         "single", accounts, success_responder("user_secret_1"),
         expect_code=0,
@@ -185,8 +185,8 @@ def test_single_success():
 @case("2. 多账号成功")
 def test_multi_success():
     accounts = [
-        {"id": "account_a", "username": "ua", "password": "pa", "enabled": True},
-        {"id": "account_b", "username": "ub", "password": "pb", "enabled": True},
+        {"username": "ua", "password": "pa", "enabled": True},
+        {"username": "ub", "password": "pb", "enabled": True},
     ]
     responder = dispatch({
         "ua": success_responder("ua", uid=1, after=1_025_000),
@@ -206,9 +206,9 @@ def test_multi_success():
 @case("3. 一个账号失败，其他继续")
 def test_partial_failure():
     accounts = [
-        {"id": "account_a", "username": "ua", "password": "pa", "enabled": True},
-        {"id": "account_b", "username": "ub", "password": "pb", "enabled": True},
-        {"id": "account_c", "username": "uc", "password": "pc", "enabled": True},
+        {"username": "ua", "password": "pa", "enabled": True},
+        {"username": "ub", "password": "pb", "enabled": True},
+        {"username": "uc", "password": "pc", "enabled": True},
     ]
 
     def failing_login(account_id, method, path, payload):
@@ -233,20 +233,20 @@ def test_partial_failure():
     return problems
 
 
-@case("4. 账号配置错误（非法 JSON / 重复 id / 空密码）")
+@case("4. 账号配置错误（非法 JSON / 重复 username / 空密码）")
 def test_config_errors():
     problems = []
     p, _, _ = run_case("bad-json", "{not-json", lambda *a: fail(500), expect_code=2,
                     expect_in=["CONFIG_ERROR", "ACCOUNTS_JSON_INVALID"])
     problems += p
     duplicate = [
-        {"id": "account_a", "username": "ua", "password": "pa", "enabled": True},
-        {"id": "account_a", "username": "ub", "password": "pb", "enabled": True},
+        {"username": "ua", "password": "pa", "enabled": True},
+        {"username": "ua", "password": "pb", "enabled": True},
     ]
-    p, _, _ = run_case("dup-id", duplicate, lambda *a: fail(500), expect_code=2,
-                    expect_in=["CONFIG_ERROR", "id 重复"])
+    p, _, _ = run_case("dup-username", duplicate, lambda *a: fail(500), expect_code=2,
+                    expect_in=["CONFIG_ERROR", "username 重复"])
     problems += p
-    empty_pwd = [{"id": "account_a", "username": "ua", "password": "", "enabled": True}]
+    empty_pwd = [{"username": "ua", "password": "", "enabled": True}]
     p, _, _ = run_case("empty-pwd", empty_pwd, lambda *a: fail(500), expect_code=2,
                     expect_in=["CONFIG_ERROR", "password 为空"])
     problems += p
@@ -269,7 +269,7 @@ def test_balance_failure():
             return ok({"username": "ua", "id": 1, "checked_in": True})
         return fail(404)
 
-    accounts = [{"id": "account_a", "username": "ua", "password": "pa", "enabled": True}]
+    accounts = [{"username": "ua", "password": "pa", "enabled": True}]
     problems, _, _ = run_case(
         "balance-fail", accounts, responder,
         expect_code=2,
@@ -294,7 +294,7 @@ def test_identity_mismatch():
             return ok({"username": "intruder", "id": 99, "checked_in": True})
         return fail(404)
 
-    accounts = [{"id": "account_a", "username": "ua", "password": "pa",
+    accounts = [{"username": "ua", "password": "pa",
                  "enabled": True, "expected_name": "ua"}]
     problems, _, _ = run_case(
         "identity", accounts, responder,
@@ -321,7 +321,7 @@ def test_identity_relaxed():
             return ok({"username": "someone_else", "id": 99, "checked_in": True})
         return fail(404)
 
-    accounts = [{"id": "account_a", "username": "ua", "password": "pa", "enabled": True}]
+    accounts = [{"username": "ua", "password": "pa", "enabled": True}]
     problems, _, _ = run_case(
         "identity-relaxed", accounts, responder,
         expect_code=0,
@@ -332,7 +332,7 @@ def test_identity_relaxed():
 
 @case("7. 通知失败不影响签到结果")
 def test_notification_failure():
-    accounts = [{"id": "account_a", "username": "ua", "password": "pa", "enabled": True}]
+    accounts = [{"username": "ua", "password": "pa", "enabled": True}]
     problems, _, _ = run_case(
         "notify-fail", accounts, success_responder("ua"),
         expect_code=0,
@@ -369,7 +369,7 @@ def test_human_verification():
             raise AssertionError("启用 Turnstile 时不应尝试登录")
         return fail(404)
 
-    accounts = [{"id": "account_a", "username": "ua", "password": "pa", "enabled": True}]
+    accounts = [{"username": "ua", "password": "pa", "enabled": True}]
     problems, _, _ = run_case(
         "captcha", accounts, responder,
         expect_code=2,
@@ -380,7 +380,7 @@ def test_human_verification():
 
 @case("附加A. 有效旧会话：前余额→退出→登录→后余额")
 def test_session_valid():
-    accounts = [{"id": "account_a", "username": "ua", "password": "pa", "enabled": True}]
+    accounts = [{"username": "ua", "password": "pa", "enabled": True}]
     problems, _, _ = run_case(
         "session-valid", accounts,
         success_responder("ua", uid=1, before=1_000_000, after=1_025_000, session_valid=True),
@@ -408,7 +408,7 @@ def test_email_identity():
             return ok({"username": "site_name", "email": "user@example.com", "id": 7, "checked_in": True})
         return fail(404)
 
-    accounts = [{"id": "account_a", "username": "user@example.com", "password": "pa",
+    accounts = [{"username": "user@example.com", "password": "pa",
                  "enabled": True, "expected_name": "user@example.com"}]
     problems, _, _ = run_case(
         "email-identity", accounts, responder,
@@ -420,7 +420,7 @@ def test_email_identity():
 
 @case("附加B. 锁冲突：TASK_NOT_EXECUTED + 退出码 3")
 def test_lock_conflict():
-    accounts = [{"id": "account_a", "username": "ua", "password": "pa", "enabled": True}]
+    accounts = [{"username": "ua", "password": "pa", "enabled": True}]
     problems, _, _ = run_case(
         "lock", accounts, lambda *a: fail(500),
         expect_code=3,
