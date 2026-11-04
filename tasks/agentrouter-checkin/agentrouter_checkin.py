@@ -26,6 +26,7 @@ import io
 import json
 import os
 import re
+import signal
 import socket
 import ssl
 import sys
@@ -238,6 +239,7 @@ class HttpClient:
             except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
                 last_exc = exc
                 if attempt < retries:
+                    log(f"  网络重试 {attempt + 1}/{retries}（{type(exc).__name__}）")
                     time.sleep(1.5 * (attempt + 1))
         raise last_exc
 
@@ -488,6 +490,8 @@ def process_account(account, base_url, proxy_url, data_dir):
             result["change"] = result["after"] - result["before"]
         result["status"] = "ok"
         return result
+    except RunTimeout:
+        raise
     except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
         result.update(status="failed", error="NETWORK_ERROR", detail=_safe_exc(exc, secrets))
         return result
@@ -627,6 +631,31 @@ def _exit_code(results):
 # 通知（notify.py 优先，明确失败才回退 Webhook；不确定不自动回退）
 # ---------------------------------------------------------------------------
 
+def _raise_timeout(signum, frame):
+    raise TimeoutError("operation timed out")
+
+
+class RunTimeout(Exception):
+    """全任务硬超时（不可被单账号异常处理吞掉）。"""
+
+
+def _raise_run_timeout(signum, frame):
+    raise RunTimeout("run timeout")
+
+
+def _call_with_timeout(seconds, func, *args):
+    """在独立计时器内调用 func，超时抛 TimeoutError；结束后恢复原计时器。"""
+    old_handler = signal.signal(signal.SIGALRM, _raise_timeout)
+    old_timer = signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return func(*args)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
+        if old_timer and old_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, old_timer[0], old_timer[1])
+
+
 def _try_qinglong_notify(title, text):
     for path in ("/ql/data/scripts", "/ql/scripts"):
         if os.path.isdir(path) and path not in sys.path:
@@ -638,7 +667,13 @@ def _try_qinglong_notify(title, text):
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
-            notify.send(title, text)
+            _call_with_timeout(30, notify.send, title, text)
+    except TimeoutError:
+        output = buffer.getvalue()
+        if output:
+            print(output, end="", flush=True)
+        log("FEISHU_AMBIGUOUS: notify.py 调用超过 30 秒，结果不确定，不自动回退")
+        return "ambiguous"
     except Exception:
         output = buffer.getvalue()
         if output:
@@ -808,6 +843,8 @@ def main(argv=None):
     lock = acquire_lock(data_dir)
     if lock is None:
         return 3
+    old_handler = signal.signal(signal.SIGALRM, _raise_run_timeout)
+    signal.alarm(RUN_BUDGET_SECONDS + 120)
     try:
         log(f"通知配置: Webhook "
             f"{'已设置' if webhook_ok else ('格式异常（应为纯 URL）' if webhook_url else '未设置')}")
@@ -910,7 +947,12 @@ def main(argv=None):
         log("")
         notify_summary(summary, proxy_url, webhook_url)
         return _exit_code(results)
+    except RunTimeout:
+        log("RUN_TIMEOUT: 超过最大运行时间，已强制结束")
+        return 1
     finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
         release_lock(lock)
 
 
