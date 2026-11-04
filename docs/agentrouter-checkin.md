@@ -38,6 +38,7 @@
 | `AGENTROUTER_WEBHOOK_URL` | 可选 | 飞书自定义机器人 Webhook；未配置时仅用青龙 notify.py |
 | `AGENTROUTER_DATA_DIR` | 可选 | 运行时数据目录，默认 `/ql/data/agentrouter-checkin` |
 | `AGENTROUTER_BASE_URL` | 可选 | 默认 `https://agentrouter.org`，一般不用改 |
+| `AGENTROUTER_TLS_MAX` | 可选 | 设为 `1.2` 时限制最高 TLS 1.2（用于排查 TLS 1.3 被中间设备中断） |
 
 ### 账号配置示例
 

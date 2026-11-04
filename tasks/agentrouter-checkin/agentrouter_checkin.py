@@ -27,6 +27,7 @@ import json
 import os
 import re
 import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -162,6 +163,14 @@ def _session_filename(username):
     return f"{safe}_{digest}.cookies"
 
 
+def _ssl_context():
+    """可选：AGENTROUTER_TLS_MAX=1.2 时限制最高 TLS 1.2（排查中间设备干扰 TLS 1.3）。"""
+    context = ssl.create_default_context()
+    if _env("AGENTROUTER_TLS_MAX").lower() in ("1.2", "tls1.2"):
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
 class HttpClient:
     """每个账号一个实例：独立 CookieJar，按 username 持久化到 data/sessions/。"""
 
@@ -189,7 +198,10 @@ class HttpClient:
                     self.user_id = saved_uid
             except Exception:
                 pass
-        handlers = [urllib.request.HTTPCookieProcessor(self.jar)]
+        handlers = [
+            urllib.request.HTTPCookieProcessor(self.jar),
+            urllib.request.HTTPSHandler(context=_ssl_context()),
+        ]
         if proxy_url:
             handlers.append(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
         self.opener = urllib.request.build_opener(*handlers)
@@ -664,7 +676,7 @@ def _try_webhook(url, text, proxy_url):
         "msg_type": "text",
         "content": {"text": text},
     }).encode("utf-8")
-    handlers = []
+    handlers = [urllib.request.HTTPSHandler(context=_ssl_context())]
     if proxy_url:
         handlers.append(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
     opener = urllib.request.build_opener(*handlers)
