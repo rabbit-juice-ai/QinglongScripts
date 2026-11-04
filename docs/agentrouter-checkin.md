@@ -3,7 +3,6 @@
 一个运行在青龙面板中的单文件 Python 定时签到脚本。无需数据库、无 Web 服务、无第三方依赖（仅 Python 标准库）。
 
 - 脚本路径：`tasks/agentrouter-checkin/agentrouter_checkin.py`
-- 测试：`tasks/agentrouter-checkin/tests/mock_test.py`（本地 Mock，不联网）
 - 站点：<https://agentrouter.org/>
 
 ## 1. 功能概览
@@ -170,18 +169,7 @@ data/
 **Q：出现 `HUMAN_ACTION_REQUIRED`？**
 站点启用了 Turnstile/验证码/MFA。脚本不会绕过，该账号暂停；其他账号继续。此时需评估是否改用浏览器方案。
 
-## 10. 测试
-
-本地 Mock 测试（不联网、不使用真实账号）：
-
-```bash
-cd tasks/agentrouter-checkin
-python3 -I tests/mock_test.py
-```
-
-覆盖：单账号/多账号成功、单账号失败隔离、配置错误、余额查询失败、身份不匹配、通知失败与结果不确定、验证码暂停、有效旧会话、邮箱身份匹配、锁冲突。
-
-## 11. 尚未验证的站点行为
+## 10. 尚未验证的站点行为
 
 - `checked_in` 的准确语义；
 - 登录是否必然触发签到、重复登录是否幂等；

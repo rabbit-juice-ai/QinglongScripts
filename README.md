@@ -121,21 +121,8 @@ QinglongScripts/
 │   └── agentrouter-checkin.md      # AgentRouter 脚本使用文档
 └── tasks/
     └── agentrouter-checkin/
-        ├── agentrouter_checkin.py  # 唯一运行文件（纯标准库）
-        └── tests/
-            └── mock_test.py        # Mock 测试（不联网）
+        └── agentrouter_checkin.py  # 唯一运行文件（纯标准库）
 ```
-
----
-
-## 🧪 本地测试 | Testing
-
-```bash
-cd tasks/agentrouter-checkin
-python3 -I tests/mock_test.py
-```
-
-全部使用 Mock，不访问真实站点、不使用真实账号。
 
 ---
 
