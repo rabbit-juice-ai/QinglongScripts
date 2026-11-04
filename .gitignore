@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Local secrets / runtime data
+.env
+*.env
+data/
+sessions/
+*.cookies
+*.session
