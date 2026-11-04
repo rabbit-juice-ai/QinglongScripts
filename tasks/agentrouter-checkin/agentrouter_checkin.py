@@ -791,7 +791,12 @@ def main(argv=None):
     base_url = _env("AGENTROUTER_BASE_URL", DEFAULT_BASE_URL) or DEFAULT_BASE_URL
     proxy_url = _env("PROXY_URL")
     env_proxy = any(
-        _env(name) for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")
+        _env(name)
+        for name in (
+            "HTTPS_PROXY", "https_proxy",
+            "HTTP_PROXY", "http_proxy",
+            "ALL_PROXY", "all_proxy",
+        )
     )
     webhook_url = _env("AGENTROUTER_WEBHOOK_URL")
     webhook_ok = (
