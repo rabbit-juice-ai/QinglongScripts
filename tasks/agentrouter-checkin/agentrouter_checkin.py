@@ -628,7 +628,7 @@ def _exit_code(results):
 
 
 # ---------------------------------------------------------------------------
-# 通知（notify.py 优先，明确失败才回退 Webhook；不确定不自动回退）
+# 通知（notify.py 优先；不可用/失败/不确定均尝试 Webhook；Webhook 不确定不重试）
 # ---------------------------------------------------------------------------
 
 def _raise_timeout(signum, frame):
@@ -672,7 +672,7 @@ def _try_qinglong_notify(title, text):
         output = buffer.getvalue()
         if output:
             print(output, end="", flush=True)
-        log("FEISHU_AMBIGUOUS: notify.py 调用超过 30 秒，结果不确定，不自动回退")
+        log("FEISHU_AMBIGUOUS: notify.py 调用超过 30 秒，结果不确定，将尝试 Webhook（可能重复发送）")
         return "ambiguous"
     except Exception:
         output = buffer.getvalue()
@@ -744,9 +744,8 @@ def notify_summary(text, proxy_url, webhook_url):
         log("NOTIFY_OK: notify.py")
         return "success"
     if result == "ambiguous":
-        log("FEISHU_AMBIGUOUS: notify.py 结果不确定，不自动回退 Webhook")
-        return "ambiguous"
-    if result == "unavailable":
+        log("FEISHU_AMBIGUOUS: notify.py 结果不确定，仍尝试 Webhook（可能重复发送）")
+    elif result == "unavailable":
         log("NOTIFY: 青龙 notify.py 不可用（本地运行属正常），使用 Webhook")
     else:
         log("NOTIFY_FALLBACK: notify.py 明确失败，尝试 Webhook")

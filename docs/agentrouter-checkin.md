@@ -108,7 +108,7 @@ cd /ql/data/scripts/<你的脚本目录> && python3 agentrouter_checkin.py --mod
    - 登录后重新获取用户信息，核对身份（配置了 `expected_name` 时严格比对）；
    - 读取签到后余额，计算变化（仅前后均成功时）；
 4. 打印每个账号结果与汇总到青龙任务日志；
-5. 发送一条飞书汇总；发送结果不确定时只记录日志，不自动重发。
+5. 发送一条飞书汇总；通知失败或结果不确定时尝试 Webhook；Webhook 结果不确定时只记录日志，不自动重试。
 
 ## 7. 结果与通知
 
@@ -116,7 +116,7 @@ cd /ql/data/scripts/<你的脚本目录> && python3 agentrouter_checkin.py --mod
 - 余额按 `/api/status` 的 `quota_per_unit` 换算为美元显示，并保留原始 quota，例如 `$499.98（249988608 quota）`；
 - 余额未知时显示“未知”，绝不显示为 0；
 - `checked_in` 只记录原始值：`true` 显示“含义待验证”，`false` 显示“不解释为已签到”；
-- 通知顺序：青龙 `notify.py` 明确成功即结束；明确失败回退 `AGENTROUTER_WEBHOOK_URL`；结果不确定记录 `FEISHU_AMBIGUOUS` 且不自动回退；Webhook 结果不确定记录日志且不重试；
+- 通知顺序：青龙 `notify.py` 明确成功即结束；不存在、明确失败或结果不确定时都会继续尝试 `AGENTROUTER_WEBHOOK_URL`（结果不确定时可能重复发送，优先保证送达）；Webhook 结果不确定时记录日志且不重试；
 - 通知失败不影响签到结果。
 
 ### 退出码
