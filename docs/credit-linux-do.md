@@ -87,12 +87,12 @@ apt-get install -y chromium
 | `CREDIT_CHROMIUM_BIN` | 否 | Chromium 路径；默认自动查找 `chromium` / `chromium-browser` / `google-chrome` |
 | `CREDIT_CDP_PORT` | 否 | CDP 起始端口，默认 `9222`；被占用时自动往后找 |
 | `CREDIT_CDP_URL` | 否 | 连接已有的 Chromium，例如 `http://127.0.0.1:9222`；一般不用 |
-| `CREDIT_BROWSER_PROXY` | 否 | Chromium 代理，例如 `http://192.168.1.2:7897` |
+| `CREDIT_BROWSER_PROXY` | 否 | Chromium 代理，例如 `http://192.168.1.2:7897`；不填时自动读取 `PROXY_URL` / `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`。设为 `none` 强制直连 |
 | `CREDIT_CF_TIMEOUT` | 否 | 等待 Cloudflare/Turnstile 的秒数，默认 `60` |
 | `CREDIT_LOGIN_TIMEOUT` | 否 | 等待登录跳转的秒数，默认 `60` |
 | `CREDIT_WEBHOOK_URL` | 否 | 飞书自定义机器人 Webhook；未配置时回退青龙 `notify.py` |
 | `CREDIT_WEBHOOK_SECRET` | 否 | 飞书机器人「签名校验」密钥；只有开启签名校验才需要 |
-| `CREDIT_WEBHOOK_PROXY` | 否 | 飞书通知专用代理（HTTP/HTTPS）；不填则用 `CREDIT_BROWSER_PROXY` 或 `PROXY_URL` |
+| `CREDIT_WEBHOOK_PROXY` | 否 | 飞书通知专用代理（HTTP/HTTPS）；不填则用 `CREDIT_BROWSER_PROXY`、`PROXY_URL` 或系统代理环境变量 |
 | `CREDIT_NOTIFY_ON_ERROR` | 否 | 失败时是否发通知，默认 `1`；设 `0` 关闭 |
 | `DEBUG` | 否 | 设为 `1` 输出调试信息（不会输出密码） |
 
@@ -115,9 +115,12 @@ apt-get install -y chromium
 先手动运行一次，首次成功日志大致如下：
 
 ```text
-[*] 启动 Chromium：/usr/bin/chromium
 [+] 已启动 Xvfb（DISPLAY=:99）
+[*] Chromium 版本：Chromium 142.x
+[*] Chromium 未配置代理，直连
+[*] 启动 Chromium：/usr/bin/chromium
 [+] Chromium 已就绪（CDP 9222）
+[*] Playwright 版本：1.65.2
 [*] credit 会话无效，开始自动登录 …
 [+] 已勾选服务条款
 [*] 点击「使用 LINUX DO 登录」…
@@ -354,6 +357,51 @@ Playwright 只通过 CDP 控制系统 Chromium，不需要 `playwright install`�
 
 如果日志里有 `Chromium 没有页面目标`，基本可以确定 Chromium 没有连上 Xvfb；
 安装 `x11-utils` 后重跑，让脚本用 `xdpyinfo` 实际探测显示器。
+
+**Q：日志提示 `chrome-error://chromewebdata/` 或「打开 https://credit.linux.do 失败」？**
+
+这是 **Chromium 网络层错误**，不是 Cloudflare。常见错误码：
+
+| 错误码 | 含义 |
+|---|---|
+| `ERR_NAME_NOT_RESOLVED` | 容器 DNS 解析失败 |
+| `ERR_CONNECTION_TIMED_OUT` / `ERR_CONNECTION_CLOSED` | 容器无法直连目标 |
+| `ERR_PROXY_CONNECTION_FAILED` | 配置的代理不可用 |
+| `ERR_CERT_AUTHORITY_INVALID` | 代理/防火墙做了 HTTPS 中间人 |
+
+先在青龙容器里确认网络：
+
+```bash
+curl -I -m 15 https://credit.linux.do/login
+curl -I -m 15 https://linux.do/login
+getent hosts credit.linux.do
+```
+
+- `curl` 也失败：检查容器的 DNS、路由或出口网络；
+- `curl` 成功但浏览器失败：通常是代理问题。Chromium **不会自动读取**
+  `http_proxy` / `https_proxy`，必须通过 `CREDIT_BROWSER_PROXY` 显式传入：
+
+  ```text
+  CREDIT_BROWSER_PROXY=http://192.168.1.2:7897
+  ```
+
+  脚本现在也会自动读取 `PROXY_URL` / `HTTPS_PROXY` / `HTTP_PROXY` /
+  `ALL_PROXY`；如果这些变量指向的代理不可用，可以显式设：
+
+  ```text
+  CREDIT_BROWSER_PROXY=none
+  ```
+
+  强制浏览器直连。修改代理后不需要手动 `--close`，脚本会检测到代理配置
+  变化并自动重启浏览器。
+
+**Q：为什么 curl 能通，Chromium 却报网络错误？**
+
+`curl` 会读取 `http_proxy` / `https_proxy` 环境变量，Chromium 不会。请把
+代理写到 `CREDIT_BROWSER_PROXY`，或确认容器的 `HTTPS_PROXY` 能被脚本读取。
+另外，青龙里的 Chromium 是**有头模式**，代理必须是容器能访问到的地址；
+`127.0.0.1` 在容器里指的是容器自己，不是宿主机。宿主机代理请用 NAS 的
+局域网 IP，例如 `http://192.168.1.2:7897`。
 
 **Q：怎么没收到飞书通知？**
 

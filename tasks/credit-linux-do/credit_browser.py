@@ -369,18 +369,74 @@ def port_free(port: int) -> bool:
             return False
 
 
+def browser_proxy() -> Optional[str]:
+    """返回 Chromium 使用的代理。
+
+    Chromium 不会自动读取 http_proxy/https_proxy，必须通过 --proxy-server
+    显式传入；这里同时兼容青龙里常见的 PROXY_URL。
+    CREDIT_BROWSER_PROXY 显式设为空、none、direct、off 时强制直连。
+    """
+    explicit = os.getenv("CREDIT_BROWSER_PROXY")
+    if explicit is not None:
+        explicit = explicit.strip()
+        if not explicit or explicit.lower() in ("none", "direct", "off", "0"):
+            return None
+        return _normalize_proxy(explicit)
+
+    for name in (
+        "PROXY_URL",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ):
+        value = os.getenv(name, "").strip()
+        if value:
+            return _normalize_proxy(value)
+    return None
+
+
+def _normalize_proxy(proxy: str) -> str:
+    # Chromium 不认 socks5h://，但 socks5:// 可以。
+    if proxy.startswith("socks5h://"):
+        return "socks5://" + proxy[len("socks5h://") :]
+    return proxy
+
+
+def redact_proxy(proxy: str) -> str:
+    """隐藏代理 URL 里的用户名密码，避免写进日志。"""
+    try:
+        normalized = proxy if "://" in proxy else f"http://{proxy}"
+        parsed = parse.urlparse(normalized)
+        if parsed.username or parsed.password:
+            host = parsed.hostname or ""
+            if parsed.port:
+                host += f":{parsed.port}"
+            return f"{parsed.scheme}://***@{host}"
+    except Exception:
+        pass
+    return proxy
+
+
 def start_chromium(profile_dir: Path) -> str:
     """返回 CDP URL。浏览器已在运行则直接复用。"""
     external = os.getenv("CREDIT_CDP_URL")
     if external:
+        log("[*] 使用外部 Chromium（CREDIT_CDP_URL），代理由该浏览器自己决定")
         return external.rstrip("/")
 
     state_path = runtime_dir() / "cdp_url"
     pid_path = runtime_dir() / "chromium.pid"
+    proxy_state_path = runtime_dir() / "browser.proxy"
+    proxy = browser_proxy()
+    proxy_hash = hashlib.sha256((proxy or "").encode("utf-8")).hexdigest()
     if state_path.is_file():
         saved = state_path.read_text().strip()
         saved_port = parse.urlparse(saved).port
         saved_ok = False
+        restart_reason = ""
         if saved_port and cdp_version(saved_port):
             try:
                 pid = int(pid_path.read_text().strip())
@@ -393,12 +449,26 @@ def start_chromium(profile_dir: Path) -> str:
                     and str(profile_dir) in cmdline
                 )
         if saved_ok:
+            try:
+                saved_proxy_hash = (
+                    proxy_state_path.read_text().strip() or None
+                )
+            except OSError:
+                saved_proxy_hash = None
+            if saved_proxy_hash is None:
+                if proxy:
+                    restart_reason = "检测到新配置的浏览器代理"
+                    saved_ok = False
+            elif saved_proxy_hash != proxy_hash:
+                restart_reason = "浏览器代理配置已变化"
+                saved_ok = False
+        if saved_ok:
             log(f"[*] 复用上次启动的 Chromium（CDP {saved_port}）")
             return saved
-        log("[!] 上次的 Chromium 状态无效，重新启动 …")
+        log(f"[!] {restart_reason or '上次的 Chromium 状态无效'}，重新启动 …")
         # 先停掉可能还占着 profile 的旧进程，否则新 Chromium 会复用旧实例。
         close_browser(profile_dir, stop_xvfb=False)
-        for path in (state_path, pid_path):
+        for path in (state_path, pid_path, proxy_state_path):
             try:
                 path.unlink()
             except OSError:
@@ -447,13 +517,23 @@ def start_chromium(profile_dir: Path) -> str:
         "--noerrdialogs",
         f"--window-size={WINDOW_SIZE}",
     ]
-    proxy = os.getenv("CREDIT_BROWSER_PROXY")
     if proxy:
         args.append(f"--proxy-server={proxy}")
+        log(f"[*] Chromium 代理：{redact_proxy(proxy)}")
+    else:
+        log("[*] Chromium 未配置代理，直连")
     args.append(LOGIN_URL)
 
     log(f"[*] 启动 Chromium：{chromium}")
-    debug("启动参数：" + " ".join(args[:-1]))
+    debug(
+        "启动参数："
+        + " ".join(
+            "--proxy-server=" + redact_proxy(arg.split("=", 1)[1])
+            if arg.startswith("--proxy-server=")
+            else arg
+            for arg in args[:-1]
+        )
+    )
     with open(log_path(), "ab") as log_handle:
         proc = subprocess.Popen(
             args,
@@ -467,6 +547,7 @@ def start_chromium(profile_dir: Path) -> str:
         if cdp_version(port):
             (runtime_dir() / "chromium.pid").write_text(str(proc.pid))
             state_path.write_text(f"http://127.0.0.1:{port}")
+            proxy_state_path.write_text(proxy_hash)
             log(f"[+] Chromium 已就绪（CDP {port}）")
             pages = wait_for_page_targets(port)
             if pages:
@@ -552,6 +633,10 @@ def close_browser(
         _kill_pid_file(runtime_dir() / "xvfb.pid", "Xvfb")
     try:
         (runtime_dir() / "cdp_url").unlink()
+    except OSError:
+        pass
+    try:
+        (runtime_dir() / "browser.proxy").unlink()
     except OSError:
         pass
 
@@ -659,14 +744,60 @@ def wait_cloudflare(page, timeout: int = CF_TIMEOUT) -> bool:
     return False
 
 
+def is_error_page(page) -> bool:
+    """Chromium 网络层错误页（DNS、代理、连接失败等），不是 Cloudflare 页面。"""
+    url = page.url or ""
+    return url.startswith("chrome-error://") or url.startswith("edge-error://")
+
+
+def page_error_detail(page) -> str:
+    """提取 Chromium 错误页上的错误码/说明，便于日志定位。"""
+    try:
+        text = page.evaluate(
+            "() => document.body ? document.body.innerText : ''"
+        )
+    except Exception:
+        return ""
+    lines = [line.strip() for line in str(text).splitlines() if line.strip()]
+    return " | ".join(lines[:5])[:400]
+
+
 def goto(page, url: str) -> None:
     debug(f"打开 {url}")
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    except Exception as exc:
-        if "Timeout" not in type(exc).__name__:
-            raise
-        debug(f"页面加载超时：{url}")
+    for attempt in range(2):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        except Exception as exc:
+            message = str(exc)
+            if "net::ERR_ABORTED" in message and not is_error_page(page):
+                debug("导航被后续跳转中断，继续等待 …")
+                break
+            if "Timeout" not in type(exc).__name__:
+                detail = page_error_detail(page) or message.splitlines()[0]
+                if attempt == 0:
+                    debug(f"打开 {url} 失败，2 秒后重试：{detail}")
+                    page.wait_for_timeout(2000)
+                    continue
+                raise CreditError(
+                    f"打开 {url} 失败：{detail}\n"
+                    "这是 Chromium 网络层错误，不是 Cloudflare。请检查青龙容器的 "
+                    "DNS、代理和对外网络。"
+                ) from exc
+            debug(f"页面加载超时：{url}")
+
+        if is_error_page(page):
+            detail = page_error_detail(page)
+            if attempt == 0:
+                debug(f"打开 {url} 进入 Chromium 错误页，2 秒后重试：{detail}")
+                page.wait_for_timeout(2000)
+                continue
+            raise CreditError(
+                f"打开 {url} 失败：{detail or 'Chromium 错误页'}\n"
+                "这是 Chromium 网络层错误，不是 Cloudflare。请检查青龙容器的 "
+                "DNS、代理和对外网络。"
+            )
+        break
+
     if not wait_cloudflare(page):
         raise CloudflareBlocked(
             f"Cloudflare 挑战没有通过（{page.url}）。"
@@ -699,7 +830,18 @@ def api_user(page) -> Optional[dict]:
     last_exc = None
     for attempt in range(3):
         if not on_credit(page):
-            raise CreditError(f"当前页面不在 credit.linux.do：{page.url}")
+            detail = page_error_detail(page)
+            hint = ""
+            if is_error_page(page):
+                hint = (
+                    "\n这是 Chromium 网络层错误，不是 Cloudflare。"
+                    "请检查青龙容器的 DNS、代理和对外网络。"
+                )
+            raise CreditError(
+                f"当前页面不在 credit.linux.do：{page.url}"
+                + (f"\n页面提示：{detail}" if detail else "")
+                + hint
+            )
         try:
             result = page.evaluate(
                 """async () => {
@@ -1242,11 +1384,11 @@ def try_webhook(text: str) -> str:
         log("[!] CREDIT_WEBHOOK_URL 格式非法（只填 https:// 开头的完整 URL）")
         return "failed"
 
-    proxy = (
-        os.getenv("CREDIT_WEBHOOK_PROXY")
-        or os.getenv("CREDIT_BROWSER_PROXY")
-        or os.getenv("PROXY_URL")
-    )
+    proxy = os.getenv("CREDIT_WEBHOOK_PROXY", "").strip()
+    if not proxy:
+        proxy = browser_proxy() or ""
+    if proxy.lower() in ("none", "direct", "off", "0"):
+        proxy = ""
     if proxy and proxy.lower().startswith("socks"):
         log("[!] 飞书通知不支持 SOCKS 代理，将直连")
         proxy = ""
