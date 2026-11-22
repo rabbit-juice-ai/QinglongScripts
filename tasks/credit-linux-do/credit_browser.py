@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# name: credit.linux.do签到
+# cron: 6 9 * * *
 """LINUX DO Credit 浏览器自动登录（青龙 / Chromium + Xvfb + Playwright）。
 
 站点：https://credit.linux.do

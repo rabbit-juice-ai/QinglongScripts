@@ -113,9 +113,13 @@ apt-get install -y chromium
 |---|---|
 | 名称 | `credit.linux.do签到`（只影响面板显示，命令和定时不变） |
 | 命令 | 订阅任务：`task rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do/credit_browser.py`<br>手动任务：`cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do && python3 credit_browser.py` |
-| 定时 | `0 9 * * *`（每天 9 点，可按需修改） |
+| 定时 | `6 9 * * *`（每天 9:06，可按需修改） |
 | 超时 | 建议 ≥ 5 分钟（首次登录要等 Cloudflare 和页面加载） |
 | 并发 | 不允许并发 |
+
+> 脚本顶部带有 `# name: credit.linux.do签到` 和 `# cron: 6 9 * * *` 元数据。
+> 青龙订阅开启「自动添加任务」时，会用这两行创建任务；**已经存在的任务不会自动
+> 改名**，需要在面板里手动改一次，或删除任务后刷新订阅重建。
 
 先手动运行一次，首次成功日志大致如下：
 
