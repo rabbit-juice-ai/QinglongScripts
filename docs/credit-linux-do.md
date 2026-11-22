@@ -178,6 +178,25 @@ python3 credit_browser.py --close
 
 > 不要相信「无头浏览器自动过 CF」的说法。本脚本不做绕过验证的事。
 
+Cloudflare 超时后，脚本会把当前页面截图保存到
+`/ql/data/credit-linux-do/logs/cf-*.png`，可以在青龙文件管理器里打开，确认是
+「正在验证」、Turnstile 勾选框，还是挑战脚本根本没加载出来。
+
+同时检查容器能否访问 Cloudflare 的挑战域名（把代理换成你自己的）：
+
+```bash
+curl -x http://192.168.1.2:7897 -I -m 15 https://challenges.cloudflare.com
+curl -x http://192.168.1.2:7897 -I -m 15 https://credit.linux.do/cdn-cgi/challenge-platform/scripts/jsd/main.js
+```
+
+这两个地址不通，Cloudflare 的 JS 永远跑不完，浏览器再真实也没用；需要在代理
+规则里放行 `challenges.cloudflare.com` 和 `*.challenges.cloudflare.com`。
+
+另外，`cf_clearance` 与**出口 IP、User-Agent** 绑定。换代理节点、轮换 IP、
+或者从 Mac 导入 cookie 后走不同出口 IP，都会让旧 clearance 失效，Cloudflare
+会重新挑战。要稳定自动通过，代理出口 IP 必须固定；否则只能人工点一次，或
+改用同一出口 IP 上的浏览器 cookie。
+
 ### 1.6 飞书通知
 
 成功和失败都会发送飞书通知（失败通知可用 `CREDIT_NOTIFY_ON_ERROR=0` 关闭）。

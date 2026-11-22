@@ -733,6 +733,21 @@ def on_credit(page) -> bool:
     return host == "credit.linux.do" or host.endswith(".credit.linux.do")
 
 
+def save_debug_screenshot(page, tag: str) -> None:
+    """Cloudflare 卡住时保存截图，方便在青龙文件管理器里查看。"""
+    try:
+        path = (
+            runtime_dir()
+            / "logs"
+            / f"{tag}-{time.strftime('%Y%m%d-%H%M%S')}.png"
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(path), full_page=False)
+        log(f"[*] 已保存页面截图：{path}")
+    except Exception as exc:  # noqa: BLE001
+        debug(f"保存截图失败：{type(exc).__name__}")
+
+
 def wait_cloudflare(page, timeout: int = CF_TIMEOUT) -> bool:
     """等待 Cloudflare 挑战页跳走；返回是否通过。"""
     deadline = time.time() + timeout
@@ -740,7 +755,11 @@ def wait_cloudflare(page, timeout: int = CF_TIMEOUT) -> bool:
         title = page_title(page)
         if title and title not in CF_TITLES:
             return True
+        debug(f"Cloudflare 等待中：title={title!r} url={page.url}")
         page.wait_for_timeout(1000)
+    title = page_title(page)
+    log(f"[!] Cloudflare 未通过：title={title!r}，url={page.url}")
+    save_debug_screenshot(page, "cf")
     return False
 
 
