@@ -111,6 +111,7 @@ apt-get install -y chromium
 
 | 配置项 | 值 |
 |---|---|
+| 名称 | `credit.linux.do签到`（只影响面板显示，命令和定时不变） |
 | 命令 | 订阅任务：`task rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do/credit_browser.py`<br>手动任务：`cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do && python3 credit_browser.py` |
 | 定时 | `0 9 * * *`（每天 9 点，可按需修改） |
 | 超时 | 建议 ≥ 5 分钟（首次登录要等 Cloudflare 和页面加载） |
