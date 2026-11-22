@@ -1246,26 +1246,31 @@ def has_hcaptcha(page) -> bool:
     return "Human Verification" in text or "人机验证" in text
 
 
+def hcaptcha_token_len(page) -> int:
+    try:
+        element = page.query_selector(
+            "textarea[name='h-captcha-response'], "
+            "input[name='h-captcha-response']"
+        )
+    except Exception:
+        return -1
+    if not element:
+        return -1
+    try:
+        value = element.evaluate("e => e.value || ''")
+    except Exception:
+        return -1
+    return len(value)
+
+
 def wait_hcaptcha(page, timeout: int = HCAPTCHA_TIMEOUT) -> bool:
     """等待 hCaptcha token 自动填充；不点击、不破解验证码。"""
     if not has_hcaptcha(page):
         return True
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            element = page.query_selector(
-                "textarea[name='h-captcha-response'], "
-                "input[name='h-captcha-response']"
-            )
-        except Exception:
-            element = None
-        if element:
-            try:
-                value = element.evaluate("e => e.value || ''")
-            except Exception:
-                value = ""
-            if len(value) > 20:
-                return True
+        if hcaptcha_token_len(page) > 20:
+            return True
         page.wait_for_timeout(1000)
     return False
 
@@ -1440,6 +1445,9 @@ def do_linuxdo_login(page, username: str, password: str) -> None:
         )
     log("[+] Cloudflare Turnstile 已通过")
 
+    # hCaptcha 可能比 Turnstile 稍晚渲染，先给页面一点时间。
+    page.wait_for_timeout(2000)
+    hcaptcha_handled = False
     if has_hcaptcha(page):
         log("[*] 检测到 linux.do 的 hCaptcha 人机验证，等待自动通过 …")
         if not wait_hcaptcha(page):
@@ -1451,6 +1459,7 @@ def do_linuxdo_login(page, username: str, password: str) -> None:
                 "或从已登录的 Mac 导出 cookie 后用 --import-cookies 导入。"
             )
         log("[+] hCaptcha 已通过")
+        hcaptcha_handled = True
 
     responses: list[dict] = []
     failures: list[str] = []
@@ -1492,6 +1501,7 @@ def do_linuxdo_login(page, username: str, password: str) -> None:
         else:
             page.click("#signin-button")
 
+        hcaptcha_deadline = None
         deadline = time.time() + LOGIN_TIMEOUT
         while time.time() < deadline:
             if "linux.do/login" not in page.url:
@@ -1507,6 +1517,27 @@ def do_linuxdo_login(page, username: str, password: str) -> None:
                 raise LoginFailed(
                     "linux.do 登录失败：账号或密码不正确，或触发了风控。"
                 )
+            if has_hcaptcha(page):
+                token_len = hcaptcha_token_len(page)
+                if token_len > 20:
+                    if not hcaptcha_handled:
+                        log("[+] hCaptcha 已通过，重新点击登录 …")
+                        if page.query_selector("#login-button"):
+                            page.click("#login-button")
+                        else:
+                            page.click("#signin-button")
+                        hcaptcha_handled = True
+                elif hcaptcha_deadline is None:
+                    hcaptcha_deadline = time.time() + HCAPTCHA_TIMEOUT
+                    log("[*] 检测到 hCaptcha，等待自动通过 …")
+                elif time.time() >= hcaptcha_deadline:
+                    save_debug_screenshot(page, "linuxdo-hcaptcha")
+                    raise NeedManual(
+                        "linux.do 登录页要求 hCaptcha 人机验证（Human Verification），"
+                        "需要人工完成。脚本不会点击或破解验证码。\n"
+                        "处理：优先直连/换住宅 IP；或用 noVNC 手动点一次；"
+                        "或从已登录的 Mac 导出 cookie 后用 --import-cookies 导入。"
+                    )
             page.wait_for_timeout(500)
 
         login_diagnostics(page, username, responses, failures)
