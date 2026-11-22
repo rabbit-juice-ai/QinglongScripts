@@ -40,6 +40,7 @@
 | 🎯 `agentrouter_checkin.py` | AgentRouter 多账号签到与余额汇总 | 手动配置（建议每天一次） | [使用文档](docs/agentrouter-checkin.md) |
 | 💳 `credit_browser.py` | LINUX DO Credit 浏览器自动登录 + 飞书余额通知（推荐，Chromium + Xvfb） | 手动配置（建议每天一次） | [使用文档](docs/credit-linux-do.md) |
 | 🍪 `credit_login.py` | LINUX DO Credit Cookie 模式（备用，纯 HTTP） | 手动配置（建议每天一次） | [使用文档](docs/credit-linux-do.md) |
+| 📤 `export_cookies.py` | 从本机 Chrome 导出 Credit 登录 cookie（配合 `--import-cookies`） | 手动运行 | [使用文档](docs/credit-linux-do.md) |
 
 > 💡 脚本路径：`tasks/<任务名>/<脚本>.py`；环境变量、任务命令、运行模式等均见对应文档。
 
@@ -58,7 +59,8 @@ QinglongScripts/
     │   └── agentrouter_checkin.py  # 唯一运行文件（纯标准库）
     └── credit-linux-do/
         ├── credit_browser.py       # 浏览器自动登录（推荐，Chromium + Xvfb + Playwright）
-        └── credit_login.py         # Cookie 纯 HTTP 模式（备用，纯标准库）
+        ├── credit_login.py         # Cookie 纯 HTTP 模式（备用，纯标准库）
+        └── export_cookies.py       # 本机 Chrome 导出登录 cookie（配合 --import-cookies）
 ```
 
 ---

@@ -165,10 +165,13 @@ python3 credit_browser.py --close
   token 由浏览器自动填充。
 - 脚本**不修改浏览器指纹、不调用打码平台、不破解 Turnstile**。如果 Cloudflare
   要求人工点击，脚本会以退出码 2 停止，并给出提示。
+- 如果 linux.do 登录页还弹 **hCaptcha**（`Human Verification` / `I am human`），
+  脚本会等待它自动通过，但不会点击或破解；超时以退出码 2 停止。
 - 这时可以：
   1. 在 Mac 的浏览器里登录 <https://credit.linux.do/balance>；
-  2. 用 Cookie-Editor 导出 cookie（至少 `linux_do_credit_session_id`、
-     `cf_clearance`、`auth.session-token`）；
+  2. 导出会话 cookie（至少 `linux_do_credit_session_id`、`auth.session-token`，
+     建议加上 `_forum_session`、`_t`；**不要导入 `cf_clearance`**，它和本机
+     IP、User-Agent 绑定，到青龙里会失效）；
   3. 把 JSON 放到青龙，然后执行：
      ```bash
      python3 credit_browser.py --import-cookies /ql/data/credit-linux-do/credit_cookies.json --check
@@ -176,6 +179,23 @@ python3 credit_browser.py --close
      浏览器会复用这份登录态；之后仍由浏览器自己刷新 Cloudflare。
   4. 进阶：在青龙容器里安装 noVNC，用网页 VNC 手动点一次验证。这个方案依赖较多，
      不在本文默认步骤里。
+
+手动复制 cookie 比较麻烦，可以在 Mac 上运行仓库里的 `export_cookies.py`：
+
+```bash
+# 1. 用一个带调试端口的 Chrome 登录 credit（路径以你机器为准）
+"/path/to/Google Chrome" --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.credit_profile" \
+  "https://credit.linux.do/balance"
+
+# 2. 另开一个终端导出
+python3 tasks/credit-linux-do/export_cookies.py --out ~/credit_cookies.json
+```
+
+`_forum_session`、`_t`、`auth.session-token` 都是 HttpOnly cookie，
+`document.cookie` 读不到，所以不能用一个普通网页读取；脚本通过 Chrome
+DevTools Protocol 读取，输出 Cookie-Editor 兼容 JSON，文件权限 600。
+默认不导出 `cf_clearance`。
 
 > 不要相信「无头浏览器自动过 CF」的说法。本脚本不做绕过验证的事。
 
