@@ -52,7 +52,10 @@ notify.py；失败通知可用 CREDIT_NOTIFY_ON_ERROR=0 关闭。
     CREDIT_CDP_URL          连接已有浏览器，例如 http://127.0.0.1:9222
     CREDIT_BROWSER_PROXY    Chromium 代理，例如 http://192.168.1.2:7897
     CREDIT_CF_TIMEOUT       Cloudflare/Turnstile 等待秒数，默认 60
+    CREDIT_HCAPTCHA_TIMEOUT hCaptcha 自动通过等待秒数，默认 20
     CREDIT_LOGIN_TIMEOUT    登录跳转等待秒数，默认 60
+    CREDIT_COOKIE_JSON      Cookie-Editor 导出的 JSON（可放青龙环境变量）
+    CREDIT_COOKIE           name=value; ... 形式的 cookie（备用）
     CREDIT_WEBHOOK_URL      飞书自定义机器人 Webhook（推荐）
     CREDIT_WEBHOOK_SECRET   飞书机器人签名校验密钥（可选）
     CREDIT_WEBHOOK_PROXY    飞书通知专用代理（可选，HTTP/HTTPS）
@@ -1960,11 +1963,10 @@ def parse_cookie_payload(text: str) -> list[dict]:
     return []
 
 
-def import_cookies(ctx, paths: list[str]) -> None:
+def _build_cookies(payloads: list[tuple[str, str]]) -> tuple[list[dict], set[str]]:
     cookies = []
     seen = set()
-    for raw_path in paths:
-        text = Path(raw_path).read_text(encoding="utf-8")
+    for _source, text in payloads:
         for item in parse_cookie_payload(text):
             name = str(item.get("name", "")).strip()
             if name not in COOKIE_NAMES or name in seen:
@@ -1987,16 +1989,60 @@ def import_cookies(ctx, paths: list[str]) -> None:
                 except (TypeError, ValueError):
                     pass
             cookies.append(cookie)
+    return cookies, seen
 
+
+def _apply_cookies(ctx, payloads: list[tuple[str, str]]) -> bool:
+    cookies, seen = _build_cookies(payloads)
     if not cookies:
-        raise NeedManual("导入的文件里没有找到可用的 linux.do cookie。")
-
+        return False
     ctx.add_cookies(cookies)
     log(f"[+] 已导入 {len(cookies)} 个 cookie")
     for cookie in cookies:
         log(f"    {cookie['name']:<28} domain={cookie['domain']}")
     if "auth.session-token" not in seen:
         log("[!] 没有 auth.session-token：可以查余额，但 credit 会话过期后需要重新登录。")
+    return True
+
+
+def import_cookies(ctx, paths: list[str]) -> None:
+    payloads = []
+    for raw_path in paths:
+        text = Path(raw_path).read_text(encoding="utf-8")
+        payloads.append((str(raw_path), text))
+    if not _apply_cookies(ctx, payloads):
+        raise NeedManual("导入的文件里没有找到可用的 linux.do cookie。")
+
+
+def import_cookies_from_env(ctx) -> bool:
+    """从 CREDIT_COOKIE_JSON / CREDIT_COOKIE 导入；适合青龙环境变量。"""
+    for name in ("CREDIT_COOKIE_JSON", "CREDIT_COOKIE"):
+        value = os.getenv(name, "").strip()
+        if not value:
+            continue
+        log(f"[*] 从环境变量 {name} 导入 cookie …")
+        if _apply_cookies(ctx, [(name, value)]):
+            return True
+        log(f"[!] {name} 里没有解析到可用的 linux.do cookie")
+        return False
+    return False
+
+
+def credit_session_in_profile(ctx) -> bool:
+    """profile 里是否有未过期的 credit 会话 cookie。"""
+    try:
+        cookies = ctx.cookies("https://credit.linux.do")
+    except Exception:
+        return False
+    now = time.time()
+    for cookie in cookies:
+        if cookie.get("name") != "linux_do_credit_session_id":
+            continue
+        expires = cookie.get("expires") or -1
+        if expires and expires > 0 and expires <= now:
+            return False
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -2227,8 +2273,14 @@ def run(args) -> int:
             clear_credit_session(session.ctx)
 
         user = None
+        env_imported = False
         if not args.login:
+            if not args.import_cookies and not credit_session_in_profile(session.ctx):
+                env_imported = import_cookies_from_env(session.ctx)
             user = check_session(page)
+            if user is None and not args.import_cookies and not env_imported:
+                if import_cookies_from_env(session.ctx):
+                    user = check_session(page)
 
         if user is None:
             if args.check:

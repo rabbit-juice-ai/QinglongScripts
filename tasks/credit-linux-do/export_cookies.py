@@ -133,6 +133,11 @@ def main() -> int:
         action="store_true",
         help="同时导出 cf_clearance（跨 IP/UA 通常会失效）",
     )
+    parser.add_argument(
+        "--stdout",
+        action="store_true",
+        help="只把 JSON 输出到 stdout（方便粘贴到青龙 CREDIT_COOKIE_JSON）",
+    )
     args = parser.parse_args()
 
     if not cdp_alive(args.cdp):
@@ -147,12 +152,20 @@ def main() -> int:
         return 1
 
     cookies, seen = read_cookies(args.cdp, args.include_cf_clearance)
+    payload = json.dumps(cookies, ensure_ascii=False, indent=2)
+
+    if args.stdout:
+        print(payload)
+        print(
+            "[!] 以上内容包含登录凭据，粘贴到青龙 CREDIT_COOKIE_JSON 后"
+            "请清空终端记录。",
+            file=sys.stderr,
+        )
+        return 0
+
     out = Path(args.out).expanduser().resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(
-        json.dumps(cookies, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    out.write_text(payload, encoding="utf-8")
     os.chmod(out, 0o600)
 
     print(f"[+] 已导出 {len(cookies)} 个 cookie -> {out}")

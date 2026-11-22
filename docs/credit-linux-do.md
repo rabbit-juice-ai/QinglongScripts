@@ -91,6 +91,8 @@ apt-get install -y chromium
 | `CREDIT_CF_TIMEOUT` | 否 | 等待 Cloudflare/Turnstile 的秒数，默认 `60` |
 | `CREDIT_HCAPTCHA_TIMEOUT` | 否 | 等待 linux.do hCaptcha 自动通过的秒数，默认 `20`；超时会提示需要人工完成 |
 | `CREDIT_LOGIN_TIMEOUT` | 否 | 等待登录跳转的秒数，默认 `60` |
+| `CREDIT_COOKIE_JSON` | 否 | Cookie-Editor 导出的 JSON 字符串；profile 没有有效会话时导入。适合直接放青龙环境变量 |
+| `CREDIT_COOKIE` | 否 | `name=value; ...` 形式的 cookie；优先级低于 `CREDIT_COOKIE_JSON` |
 | `CREDIT_WEBHOOK_URL` | 否 | 飞书自定义机器人 Webhook；未配置时回退青龙 `notify.py` |
 | `CREDIT_WEBHOOK_SECRET` | 否 | 飞书机器人「签名校验」密钥；只有开启签名校验才需要 |
 | `CREDIT_WEBHOOK_PROXY` | 否 | 飞书通知专用代理（HTTP/HTTPS）；不填则用 `CREDIT_BROWSER_PROXY`、`PROXY_URL` 或系统代理环境变量 |
@@ -196,6 +198,19 @@ python3 tasks/credit-linux-do/export_cookies.py --out ~/credit_cookies.json
 `document.cookie` 读不到，所以不能用一个普通网页读取；脚本通过 Chrome
 DevTools Protocol 读取，输出 Cookie-Editor 兼容 JSON，文件权限 600。
 默认不导出 `cf_clearance`。
+
+不想上传文件时，可以只输出 JSON 并粘贴到青龙环境变量：
+
+```bash
+python3 tasks/credit-linux-do/export_cookies.py --stdout
+```
+
+把输出保存为青龙环境变量 `CREDIT_COOKIE_JSON`。脚本只在浏览器 profile
+没有有效会话时导入，不会覆盖后续刷新出来的新 cookie。也可以把
+`name=value; ...` 形式放到 `CREDIT_COOKIE`，但 `CREDIT_COOKIE_JSON` 优先。
+
+> `CREDIT_COOKIE_JSON` 等同于登录态，青龙面板里能看环境变量的人都能看到；
+> 请限制面板访问权限，不要截图或分享。
 
 > 不要相信「无头浏览器自动过 CF」的说法。本脚本不做绕过验证的事。
 
