@@ -97,7 +97,16 @@ CDP_START_TIMEOUT = 30
 CF_TIMEOUT = int(os.getenv("CREDIT_CF_TIMEOUT", "60"))
 LOGIN_TIMEOUT = int(os.getenv("CREDIT_LOGIN_TIMEOUT", "60"))
 
-CF_TITLES = ("请稍候…", "请稍候...", "Just a moment...", "Just a moment…")
+CF_TITLES = (
+    "请稍候…",
+    "请稍候...",
+    "Just a moment...",
+    "Just a moment…",
+    "Attention Required! | Cloudflare",
+    "Attention Required!",
+    "Sorry, you have been blocked",
+)
+CF_BLOCK_MARKERS = ("attention required", "you have been blocked", "访问被拒绝")
 
 COOKIE_NAMES = {
     "linux_do_credit_session_id",
@@ -418,6 +427,70 @@ def redact_proxy(proxy: str) -> str:
     except Exception:
         pass
     return proxy
+
+
+def public_ip(proxy: Optional[str]) -> Optional[str]:
+    """查询浏览器出口 IP，用于判断 cf_clearance 是否因 IP 变化而失效。"""
+    if proxy and proxy.lower().startswith("socks"):
+        debug("跳过出口 IP 查询：urllib 不支持 SOCKS 代理")
+        return None
+    if proxy:
+        handlers = [urllib.request.ProxyHandler({"http": proxy, "https": proxy})]
+    else:
+        # 显式清空环境变量代理，和 CREDIT_BROWSER_PROXY=none 的浏览器行为一致。
+        handlers = [urllib.request.ProxyHandler({})]
+    opener = urllib.request.build_opener(*handlers)
+    request = urllib.request.Request(
+        "https://api.ipify.org",
+        headers={"User-Agent": "credit-browser/1.0"},
+    )
+    try:
+        with opener.open(request, timeout=8) as response:
+            value = response.read(64).decode("ascii", "ignore").strip()
+    except Exception as exc:  # noqa: BLE001
+        debug(f"查询出口 IP 失败：{type(exc).__name__}: {exc}")
+        return None
+    if re.fullmatch(r"[0-9a-fA-F:.]{7,45}", value):
+        return value
+    return None
+
+
+def check_exit_ip(proxy: Optional[str]) -> None:
+    """输出出口 IP；与上次不同则提示 cf_clearance 会失效。"""
+    ip = public_ip(proxy)
+    if not ip:
+        log("[!] 无法查询出口 IP（只影响诊断，不影响任务）")
+        return
+    state_path = runtime_dir() / "exit_ip"
+    previous = ""
+    try:
+        previous = state_path.read_text().strip()
+    except OSError:
+        pass
+    log(f"[*] 浏览器出口 IP：{ip}")
+    if previous and previous != ip:
+        log(
+            f"[!] 出口 IP 已变化（上次 {previous}）："
+            "cf_clearance 与 IP 绑定，Cloudflare 会重新挑战"
+        )
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(ip)
+    except OSError:
+        pass
+
+
+def log_cf_clearance(ctx) -> None:
+    """提示当前 profile 是否已有 cf_clearance；不输出 cookie 值。"""
+    try:
+        cookies = ctx.cookies("https://credit.linux.do")
+    except Exception:
+        return
+    names = {cookie.get("name") for cookie in cookies}
+    if "cf_clearance" in names:
+        debug("浏览器 profile 已有 cf_clearance")
+    else:
+        log("[*] 浏览器 profile 还没有 cf_clearance，本次会先走 Cloudflare 挑战")
 
 
 def start_chromium(profile_dir: Path) -> str:
@@ -748,18 +821,127 @@ def save_debug_screenshot(page, tag: str) -> None:
         debug(f"保存截图失败：{type(exc).__name__}")
 
 
+def _challenge_resources(page) -> list[dict]:
+    """从 performance 里读取 Cloudflare 挑战脚本的加载情况。"""
+    try:
+        resources = page.evaluate(
+            """() => performance.getEntriesByType('resource')
+              .filter(r => /challenges\\.cloudflare\\.com|cdn-cgi\\/challenge-platform|\\/cdn-cgi\\/challenge/.test(r.name))
+              .slice(-8)
+              .map(r => ({
+                name: r.name,
+                status: (typeof r.responseStatus === 'number' ? r.responseStatus : null),
+                ms: Math.round(r.duration || 0),
+                size: r.transferSize || 0,
+              }))"""
+        )
+    except Exception:
+        return []
+    return list(resources or [])
+
+
+def cloudflare_diagnostics(page) -> None:
+    """Cloudflare 超时时输出可操作信息；不读取、不输出 cookie 值。"""
+    try:
+        state = page.evaluate(
+            """() => {
+              const iframes = Array.from(document.querySelectorAll('iframe'))
+                .filter(f => /challenges\\.cloudflare\\.com/.test(f.src || ''))
+                .map(f => ({w: f.offsetWidth || 0, h: f.offsetHeight || 0}));
+              const input = document.querySelector('input[name="cf-turnstile-response"]');
+              return {
+                title: document.title || '',
+                url: location.href,
+                turnstileIframes: iframes,
+                tokenLen: input ? (input.value || '').length : -1,
+                hasApi: typeof window.turnstile !== 'undefined',
+                text: (document.body ? document.body.innerText : '')
+                  .replace(/\\s+/g, ' ').trim().slice(0, 200),
+              };
+            }"""
+        )
+    except Exception as exc:  # noqa: BLE001
+        debug(f"读取 Cloudflare 页面状态失败：{type(exc).__name__}")
+        state = {}
+
+    title = state.get("title") or page_title(page)
+    url = state.get("url") or page.url
+    log(f"[!] Cloudflare 未通过：title={title!r}，url={url}")
+
+    iframes = state.get("turnstileIframes") or []
+    token_len = int(state.get("tokenLen", -1))
+    has_api = bool(state.get("hasApi", False))
+    if iframes:
+        visible = [
+            item
+            for item in iframes
+            if item.get("w", 0) > 20 and item.get("h", 0) > 20
+        ]
+        log(
+            f"[!] Turnstile iframe：{len(iframes)} 个（可见 {len(visible)} 个），"
+            f"window.turnstile={'已加载' if has_api else '未加载'}"
+        )
+    else:
+        log("[!] 页面里没有 Turnstile iframe")
+
+    if token_len == 0:
+        log("[!] Turnstile token 为空：挑战没有完成")
+    elif token_len > 0:
+        log(f"[!] Turnstile token 已填充（长度 {token_len}），但页面仍未跳转")
+
+    resources = _challenge_resources(page)
+    for item in resources:
+        name = str(item.get("name", "")).split("?")[0]
+        short = name[-90:] if len(name) > 90 else name
+        status = item.get("status")
+        if status is None:
+            status_text = "未知"
+        elif status == 0:
+            status_text = "失败/被拦截"
+        else:
+            status_text = str(status)
+        log(
+            f"[!] 挑战资源：{short} status={status_text} "
+            f"{item.get('ms', 0)}ms size={item.get('size', 0)}"
+        )
+    if not resources:
+        log("[!] 没有记录到挑战脚本资源：可能被代理/DNS 拦截，或页面尚未开始挑战")
+
+    if any(item.get("status") == 0 for item in resources):
+        log("[!] 判断：挑战脚本请求失败，检查代理是否放行 challenges.cloudflare.com")
+    elif iframes and token_len == 0:
+        log(
+            "[!] 判断：Turnstile 已加载但未自动完成；"
+            "可能需要人工点击，或出口 IP 被重点挑战"
+        )
+    elif not iframes and not resources:
+        log(
+            "[!] 判断：挑战页没有加载出 Turnstile；"
+            "检查代理/DNS，或把 CREDIT_CF_TIMEOUT 调大到 180 再试"
+        )
+
+    text = state.get("text") or ""
+    if text:
+        debug(f"Cloudflare 页面文字：{text[:160]}")
+
+    save_debug_screenshot(page, "cf")
+
+
 def wait_cloudflare(page, timeout: int = CF_TIMEOUT) -> bool:
     """等待 Cloudflare 挑战页跳走；返回是否通过。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
         title = page_title(page)
+        lowered = title.lower()
+        if any(marker in lowered for marker in CF_BLOCK_MARKERS):
+            log(f"[!] Cloudflare 明确拒绝访问：title={title!r}")
+            cloudflare_diagnostics(page)
+            return False
         if title and title not in CF_TITLES:
             return True
         debug(f"Cloudflare 等待中：title={title!r} url={page.url}")
         page.wait_for_timeout(1000)
-    title = page_title(page)
-    log(f"[!] Cloudflare 未通过：title={title!r}，url={page.url}")
-    save_debug_screenshot(page, "cf")
+    cloudflare_diagnostics(page)
     return False
 
 
@@ -964,6 +1146,7 @@ def wait_turnstile(page, timeout: int = CF_TIMEOUT) -> bool:
             if len(value) > 20:
                 return True
         page.wait_for_timeout(1000)
+    cloudflare_diagnostics(page)
     return False
 
 
@@ -1741,6 +1924,10 @@ def run(args) -> int:
     else:
         profile_dir = default_profile_dir()
     cdp_url = start_chromium(profile_dir)
+    if os.getenv("CREDIT_CDP_URL"):
+        log("[*] 使用外部 Chromium，跳过出口 IP 检查")
+    else:
+        check_exit_ip(browser_proxy())
 
     with contextlib.ExitStack() as stack:
         try:
@@ -1754,6 +1941,7 @@ def run(args) -> int:
             session = stack.enter_context(BrowserSession(cdp_url))
 
         page = session.page
+        log_cf_clearance(session.ctx)
         if args.import_cookies:
             import_cookies(session.ctx, args.import_cookies)
         if args.login:

@@ -182,6 +182,30 @@ Cloudflare 超时后，脚本会把当前页面截图保存到
 `/ql/data/credit-linux-do/logs/cf-*.png`，可以在青龙文件管理器里打开，确认是
 「正在验证」、Turnstile 勾选框，还是挑战脚本根本没加载出来。
 
+脚本还会输出一段诊断，例如：
+
+```text
+[*] 浏览器出口 IP：203.0.113.10
+[!] 出口 IP 已变化（上次 198.51.100.7）：cf_clearance 与 IP 绑定，Cloudflare 会重新挑战
+[!] Turnstile iframe：1 个（可见 1 个），window.turnstile=未加载
+[!] Turnstile token 为空：挑战没有完成
+[!] 挑战资源：.../cdn-cgi/challenge-platform/scripts/jsd/main.js status=失败/被拦截 1200ms size=0
+[!] 判断：挑战脚本请求失败，检查代理是否放行 challenges.cloudflare.com
+```
+
+按诊断处理：
+
+- `出口 IP 已变化`：代理在轮换节点。换固定节点，或让容器直连
+  （`CREDIT_BROWSER_PROXY=none`）；
+- `挑战资源 status=失败/被拦截`：挑战脚本没加载，在代理规则里放行
+  `challenges.cloudflare.com` 和 `*.challenges.cloudflare.com`；
+- `Turnstile 已加载但未自动完成`：需要人工点击，或该出口 IP 被重点挑战；
+- `没有 Turnstile iframe` / `没有挑战资源`：页面还没开始挑战，或代理/DNS 有问题；
+  可以先把 `CREDIT_CF_TIMEOUT` 调到 `180` 再试。
+
+> 优先试直连：`CREDIT_BROWSER_PROXY=none`。NAS 的家庭宽带出口通常是住宅 IP，
+> 比机房代理节点更容易通过 Cloudflare；只有直连打不开站点时才用代理。
+
 同时检查容器能否访问 Cloudflare 的挑战域名（把代理换成你自己的）：
 
 ```bash
@@ -303,7 +327,30 @@ pip3 install playwright
 **Q：日志提示「Cloudflare Turnstile 需要人工完成」？**
 
 真实浏览器没有自动通过验证。脚本不会绕过，处理方式见 1.5：从 Mac 导入
-cookie，或安装 noVNC 手动点一次。
+cookie，或安装 noVNC 手动点一次。先看同一次运行里的诊断：
+
+- `挑战资源 status=失败/被拦截`：先修代理，放行 `challenges.cloudflare.com`；
+- `Turnstile 已加载但未自动完成`：再考虑人工点击或换出口 IP。
+
+**Q：日志提示「出口 IP 已变化」？**
+
+`cf_clearance` 和出口 IP 绑定，IP 一变旧 cookie 就失效。这是代理轮换节点的
+典型表现。处理方式：
+
+```text
+# 1. 先试直连
+CREDIT_BROWSER_PROXY=none
+
+# 2. 必须用代理时，选固定出口 IP 的节点
+CREDIT_BROWSER_PROXY=http://192.168.1.2:7897
+```
+
+连续两次查询出口 IP，结果应该完全一致：
+
+```bash
+curl -x http://192.168.1.2:7897 -s https://api.ipify.org; echo
+curl -x http://192.168.1.2:7897 -s https://api.ipify.org; echo
+```
 
 **Q：日志提示「linux.do 登录失败：账号或密码不正确」？**
 
