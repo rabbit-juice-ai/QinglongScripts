@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Credit Cookie 工具</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Ctext x='16' y='23' font-size='18' text-anchor='middle' fill='white' font-family='Arial'%3EC%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --text: #1c2434;
+    --muted: #667085;
+    --line: #e4e8f0;
+    --accent: #2563eb;
+    --accent-dark: #1d4ed8;
+    --ok: #15803d;
+    --ok-bg: #e9f7ef;
+    --warn: #b45309;
+    --warn-bg: #fff7e6;
+    --bad: #b42318;
+    --bad-bg: #fef3f2;
+    --code: #0f172a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(1200px 500px at 10% -10%, #dbeafe 0%, transparent 60%),
+      radial-gradient(900px 400px at 110% 0%, #ede9fe 0%, transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 36px 20px 64px; }
+  header { margin-bottom: 22px; }
+  h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 8px 28px rgba(20, 30, 60, 0.06);
+  }
+  .card h2 {
+    margin: 0 0 14px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .status-item {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: #fafbff;
+  }
+  .status-item .label { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .status-item .value {
+    font-size: 14px;
+    word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .dot {
+    display: inline-block;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    margin-right: 7px;
+    background: #98a2b3;
+    vertical-align: 1px;
+  }
+  .dot.on { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,.15); }
+  .dot.off { background: #ef4444; box-shadow: 0 0 0 4px rgba(239,68,68,.12); }
+  .pages { margin: 12px 0 0; padding: 0; list-style: none; }
+  .pages li {
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #f7f8fc;
+    margin-top: 6px;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pages .ptitle { font-weight: 600; }
+  .pages .purl { color: var(--muted); margin-left: 8px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--text);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .05s ease, box-shadow .15s ease, background .15s ease;
+  }
+  button:hover { background: #f7f9ff; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary {
+    background: linear-gradient(180deg, #3b82f6, var(--accent));
+    border-color: var(--accent);
+    color: #fff;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, .25);
+  }
+  button.primary:hover { background: var(--accent-dark); }
+  button.danger { color: var(--bad); }
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 13px;
+    margin-left: auto;
+    user-select: none;
+  }
+  .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .result-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #eef2ff;
+    color: #3730a3;
+  }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.bad { background: var(--bad-bg); color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td {
+    text-align: left;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .flag { color: var(--muted); font-size: 12px; }
+  .warnings { margin: 12px 0 0; padding: 0; list-style: none; }
+  .warnings li {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-radius: 8px;
+    padding: 8px 11px;
+    margin-top: 6px;
+    font-size: 13px;
+  }
+  .json-box { position: relative; margin-top: 14px; }
+  textarea {
+    width: 100%;
+    min-height: 260px;
+    resize: vertical;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    background: var(--code);
+    color: #e2e8f0;
+    font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    outline: none;
+  }
+  textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+  .json-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .login-result {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    background: #fafbff;
+    display: none;
+  }
+  .login-result.show { display: block; }
+  .login-result .who { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+  .login-result .numbers { display: flex; flex-wrap: wrap; gap: 18px; color: var(--muted); }
+  .login-result .numbers b { color: var(--text); font-size: 16px; }
+  .login-result.bad { background: var(--bad-bg); border-color: #fecdca; color: var(--bad); }
+  .steps { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+  .steps li { margin: 6px 0; }
+  .steps b { color: var(--text); }
+  code {
+    background: #eef2f7;
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: #334155;
+  }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 14px; }
+  .note b { color: var(--warn); }
+  #toast {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translate(-50%, 20px);
+    background: #111827;
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: 999px;
+    font-size: 13.5px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+    z-index: 50;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  @media (max-width: 640px) {
+    .wrap { padding: 22px 14px 48px; }
+    h1 { font-size: 22px; }
+    .check { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Credit Cookie 工具</h1>
+    <div class="sub">
+      从本机 Chrome 读取 credit.linux.do 登录态，生成青龙环境变量
+      <code>CREDIT_COOKIE_JSON</code>。页面只监听 127.0.0.1。
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>状态</h2>
+    <div class="status-grid">
+      <div class="status-item">
+        <div class="label">Chrome CDP</div>
+        <div class="value" id="cdp-state"><span class="dot"></span>检测中…</div>
+      </div>
+      <div class="status-item">
+        <div class="label">Chrome 版本</div>
+        <div class="value" id="chrome-version">—</div>
+      </div>
+      <div class="status-item">
+        <div class="label">Profile</div>
+        <div class="value" id="profile-path">—</div>
+      </div>
+      <div class="status-item">
+        <div class="label">Chrome 路径</div>
+        <div class="value" id="chrome-path">—</div>
+      </div>
+    </div>
+    <ul class="pages" id="page-list"></ul>
+  </section>
+
+  <section class="card">
+    <h2>操作</h2>
+    <div class="actions">
+      <button id="btn-launch">启动 Chrome</button>
+      <button id="btn-open">打开登录页</button>
+      <button id="btn-read" class="primary">读取 Cookie</button>
+      <button id="btn-check">验证登录</button>
+      <label class="check" title="cf_clearance 与出口 IP、UA 绑定，通常不需要导出">
+        <input type="checkbox" id="include-cf"> 包含 cf_clearance（不推荐）
+      </label>
+    </div>
+    <div class="login-result" id="login-result"></div>
+  </section>
+
+  <section class="card" id="result-card" style="display:none">
+    <h2>结果</h2>
+    <div class="result-head">
+      <span class="badge" id="cookie-count">0 个 cookie</span>
+      <span class="badge ok" id="badge-session">credit 会话</span>
+      <span class="badge ok" id="badge-auth">auth 续期</span>
+      <button id="btn-clear" class="danger" style="margin-left:auto">清空</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Cookie</th><th>Domain</th><th>有效期</th><th>属性</th></tr>
+      </thead>
+      <tbody id="cookie-rows"></tbody>
+    </table>
+    <ul class="warnings" id="warnings"></ul>
+    <div class="json-box">
+      <textarea id="json-out" readonly spellcheck="false"
+        placeholder="点击「读取 Cookie」生成 JSON"></textarea>
+      <div class="json-actions">
+        <button id="btn-copy" class="primary">复制 JSON</button>
+        <button id="btn-download">下载 JSON</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>使用步骤</h2>
+    <ol class="steps">
+      <li>点 <b>启动 Chrome</b>。工具会用独立 profile 启动一个带调试端口的 Chrome。</li>
+      <li>在打开的 Chrome 里登录 <b>credit.linux.do/balance</b>，完成 Cloudflare
+        或人机验证，直到能看到余额。</li>
+      <li>回到本页点 <b>读取 Cookie</b>，再点 <b>复制 JSON</b>。</li>
+      <li>在青龙「环境变量」新增 <code>CREDIT_COOKIE_JSON</code>，粘贴 JSON。</li>
+      <li>青龙定时任务只需要 <code>credit_browser.py</code>；脚本在 profile
+        没有有效会话时自动导入。</li>
+    </ol>
+    <div class="note">
+      <b>安全提示：</b>生成的 JSON 等同于登录凭据，不要截图、不要发到群里。
+      <code>cf_clearance</code> 和出口 IP、User-Agent 绑定，导入青龙后通常会失效，
+      默认不导出。用完可以点「清空」从页面移除。
+    </div>
+  </section>
+</div>
+<div id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const state = { payload: "", busy: false };
+
+  function toast(message) {
+    const el = $("toast");
+    el.textContent = message;
+    el.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => el.classList.remove("show"), 2200);
+  }
+
+  async function api(path, body) {
+    const options = { method: body === undefined ? "GET" : "POST" };
+    if (body !== undefined) {
+      options.headers = { "Content-Type": "application/json" };
+      options.body = JSON.stringify(body);
+    }
+    let response;
+    try {
+      response = await fetch(path, options);
+    } catch (err) {
+      throw new Error("无法连接本机工具服务，请确认 cookie_tool.py 仍在运行。");
+    }
+    let data = {};
+    try { data = await response.json(); } catch (err) { /* ignore */ }
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || ("HTTP " + response.status));
+    }
+    return data;
+  }
+
+  function setBusy(button, busy, label) {
+    state.busy = busy;
+    ["btn-launch", "btn-open", "btn-read", "btn-check"].forEach((id) => {
+      $(id).disabled = busy;
+    });
+    if (button) {
+      if (busy) {
+        button.dataset.label = button.textContent;
+        button.textContent = label || "处理中…";
+      } else if (button.dataset.label) {
+        button.textContent = button.dataset.label;
+      }
+    }
+  }
+
+  function text(tag, className, value) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (value !== undefined) el.textContent = value;
+    return el;
+  }
+
+  function renderStatus(data) {
+    const dot = $("cdp-state");
+    dot.textContent = "";
+    dot.appendChild(text("span", "dot " + (data.cdp ? "on" : "off")));
+    dot.appendChild(document.createTextNode(
+      data.cdp ? "已连接" : "未连接"
+    ));
+    $("chrome-version").textContent =
+      data.version && data.version.browser ? data.version.browser : "—";
+    $("profile-path").textContent = data.profile || "—";
+    $("chrome-path").textContent = data.chrome || "未找到";
+    $("btn-launch").disabled = data.cdp || state.busy;
+
+    const list = $("page-list");
+    list.textContent = "";
+    (data.pages || []).forEach((page) => {
+      const li = document.createElement("li");
+      li.appendChild(text("span", "ptitle", page.title || "(无标题)"));
+      li.appendChild(text("span", "purl", page.url || ""));
+      list.appendChild(li);
+    });
+  }
+
+  async function refreshStatus() {
+    try {
+      renderStatus(await api("/api/status"));
+    } catch (err) {
+      $("cdp-state").textContent = "服务未连接";
+      $("btn-launch").disabled = true;
+    }
+  }
+
+  async function readCookies() {
+    if (state.busy) return;
+    setBusy($("btn-read"), true, "读取中…");
+    try {
+      const data = await api("/api/cookies", {
+        include_cf_clearance: $("include-cf").checked,
+      });
+      state.payload = data.payload || "";
+      $("result-card").style.display = "";
+      $("cookie-count").textContent = data.count + " 个 cookie";
+      $("json-out").value = state.payload;
+
+      const names = new Set((data.cookies || []).map((c) => c.name));
+      $("badge-session").className =
+        "badge " + (names.has("linux_do_credit_session_id") ? "ok" : "bad");
+      $("badge-session").textContent = names.has("linux_do_credit_session_id")
+        ? "credit 会话" : "缺少 credit 会话";
+      $("badge-auth").className =
+        "badge " + (names.has("auth.session-token") ? "ok" : "warn");
+      $("badge-auth").textContent = names.has("auth.session-token")
+        ? "auth 续期" : "无 auth 续期";
+
+      const rows = $("cookie-rows");
+      rows.textContent = "";
+      (data.cookies || []).forEach((cookie) => {
+        const tr = document.createElement("tr");
+        tr.appendChild(text("td", "mono", cookie.name));
+        tr.appendChild(text("td", "mono", cookie.domain));
+        tr.appendChild(text("td", "", cookie.expiry));
+        const flags = [];
+        if (cookie.httpOnly) flags.push("HttpOnly");
+        if (cookie.secure) flags.push("Secure");
+        tr.appendChild(text("td", "flag", flags.join(" · ") || "—"));
+        rows.appendChild(tr);
+      });
+
+      const warnings = $("warnings");
+      warnings.textContent = "";
+      (data.warnings || []).forEach((warning) => {
+        warnings.appendChild(text("li", "", warning));
+      });
+
+      toast("已读取 " + data.count + " 个 cookie");
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy($("btn-read"), false);
+      refreshStatus();
+    }
+  }
+
+  async function copyJson() {
+    if (!state.payload) return;
+    try {
+      await navigator.clipboard.writeText(state.payload);
+      toast("JSON 已复制到剪贴板");
+    } catch (err) {
+      const area = $("json-out");
+      area.focus();
+      area.select();
+      document.execCommand("copy");
+      toast("已复制（兼容模式）");
+    }
+  }
+
+  function downloadJson() {
+    if (!state.payload) return;
+    const blob = new Blob([state.payload], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "credit_cookies.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    toast("已下载 credit_cookies.json");
+  }
+
+  async function launchChrome() {
+    if (state.busy) return;
+    setBusy($("btn-launch"), true, "启动中…");
+    try {
+      const data = await api("/api/launch", {});
+      toast(data.launched ? "Chrome 已启动" : "Chrome 已在运行");
+      setTimeout(refreshStatus, 1200);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy($("btn-launch"), false);
+    }
+  }
+
+  async function openLogin() {
+    if (state.busy) return;
+    setBusy($("btn-open"), true, "打开中…");
+    try {
+      const data = await api("/api/open", {
+        url: "https://credit.linux.do/balance",
+      });
+      toast("已在 Chrome 打开：" + (data.title || data.url));
+      setTimeout(refreshStatus, 800);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy($("btn-open"), false);
+    }
+  }
+
+  async function checkLogin() {
+    if (state.busy) return;
+    setBusy($("btn-check"), true, "验证中…");
+    const box = $("login-result");
+    try {
+      const data = await api("/api/check", { timeout: 60 });
+      box.className = "login-result show";
+      box.textContent = "";
+      if (data.ok) {
+        const user = data.user || {};
+        box.appendChild(text(
+          "div", "who",
+          (user.nickname || user.username || "已登录") +
+          (user.username ? " (@" + user.username + ")" : "")
+        ));
+        const numbers = text("div", "numbers");
+        [
+          ["可用余额", user.available_balance, " LDC"],
+          ["社区积分", user.community_balance, ""],
+          ["待结算", user.pending_balance, " LDC"],
+        ].forEach(([label, value, suffix]) => {
+          const item = text("span", "", label + "：");
+          item.appendChild(text("b", "", String(value ?? "—") + suffix));
+          numbers.appendChild(item);
+        });
+        box.appendChild(numbers);
+      } else {
+        box.classList.add("bad");
+        box.appendChild(text("div", "who", "会话不可用"));
+        box.appendChild(text("div", "", data.reason || "未知原因"));
+      }
+    } catch (err) {
+      box.className = "login-result show bad";
+      box.textContent = err.message;
+    } finally {
+      setBusy($("btn-check"), false);
+    }
+  }
+
+  $("btn-launch").addEventListener("click", launchChrome);
+  $("btn-open").addEventListener("click", openLogin);
+  $("btn-read").addEventListener("click", readCookies);
+  $("btn-check").addEventListener("click", checkLogin);
+  $("btn-copy").addEventListener("click", copyJson);
+  $("btn-download").addEventListener("click", downloadJson);
+  $("btn-clear").addEventListener("click", () => {
+    state.payload = "";
+    $("json-out").value = "";
+    $("cookie-rows").textContent = "";
+    $("warnings").textContent = "";
+    $("result-card").style.display = "none";
+    toast("已从页面清空");
+  });
+
+  refreshStatus();
+  setInterval(refreshStatus, 10000);
+})();
+</script>
+</body>
+</html>

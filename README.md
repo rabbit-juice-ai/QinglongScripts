@@ -35,14 +35,22 @@
 
 ## 📜 脚本列表 | Script List
 
+### 青龙定时任务
+
 | 脚本 | 功能 | 定时规则 | 文档 |
 |:---:|:---|:---:|:---:|
 | 🎯 `agentrouter_checkin.py` | AgentRouter 多账号签到与余额汇总 | 手动配置（建议每天一次） | [使用文档](docs/agentrouter-checkin.md) |
-| 💳 `credit_browser.py` | LINUX DO Credit 浏览器自动登录 + 飞书余额通知（推荐，Chromium + Xvfb） | 手动配置（建议每天一次） | [使用文档](docs/credit-linux-do.md) |
-| 🍪 `credit_login.py` | LINUX DO Credit Cookie 模式（备用，纯 HTTP） | 手动配置（建议每天一次） | [使用文档](docs/credit-linux-do.md) |
-| 📤 `export_cookies.py` | 从本机 Chrome 导出 Credit 登录 cookie（配合 `--import-cookies`） | 手动运行 | [使用文档](docs/credit-linux-do.md) |
+| 💳 `credit_browser.py` | LINUX DO Credit 浏览器自动登录 + 飞书余额通知（Chromium + Xvfb） | 手动配置（建议每天一次） | [使用文档](docs/credit-linux-do.md) |
 
 > 💡 脚本路径：`tasks/<任务名>/<脚本>.py`；环境变量、任务命令、运行模式等均见对应文档。
+> LINUX DO Credit 的定时任务只需要 `credit_browser.py`。
+
+### 本机工具
+
+| 工具 | 功能 | 运行方式 | 文档 |
+|:---:|:---|:---:|:---:|
+| 🍪 `cookie_tool.py` | 页面读取 Credit 登录 cookie，生成 `CREDIT_COOKIE_JSON` | 本机手动运行 | [工具说明](tools/credit-cookie/README.md) |
+| 📤 `export_cookies.py` | 命令行导出 Credit 登录 cookie | 本机手动运行 | [工具说明](tools/credit-cookie/README.md) |
 
 ---
 
@@ -54,13 +62,19 @@ QinglongScripts/
 ├── docs/
 │   ├── agentrouter-checkin.md      # AgentRouter 脚本使用文档
 │   └── credit-linux-do.md          # LINUX DO Credit 脚本使用文档
-└── tasks/
-    ├── agentrouter-checkin/
-    │   └── agentrouter_checkin.py  # 唯一运行文件（纯标准库）
-    └── credit-linux-do/
-        ├── credit_browser.py       # 浏览器自动登录（推荐，Chromium + Xvfb + Playwright）
-        ├── credit_login.py         # Cookie 纯 HTTP 模式（备用，纯标准库）
-        └── export_cookies.py       # 本机 Chrome 导出登录 cookie（配合 --import-cookies）
+├── tasks/
+│   ├── agentrouter-checkin/
+│   │   └── agentrouter_checkin.py  # 唯一运行文件（纯标准库）
+│   └── credit-linux-do/
+│       └── credit_browser.py       # 浏览器自动登录（Chromium + Xvfb + Playwright）
+└── tools/
+    ├── README.md                   # 本机工具索引
+    └── credit-cookie/
+        ├── README.md               # 工具说明
+        ├── cookie_tool.py          # 页面工具：读取 cookie / 生成 JSON
+        ├── export_cookies.py       # 命令行导出
+        ├── cookie_core.py          # 共享 CDP 逻辑
+        └── index.html              # 工具页面
 ```
 
 ---

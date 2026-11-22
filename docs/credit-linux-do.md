@@ -1,18 +1,18 @@
 # LINUX DO Credit 自动登录使用文档
 
-提供两种运行模式：
+青龙定时任务只需要一个脚本：**`credit_browser.py`**。
 
-| 模式 | 脚本 | 适用场景 |
+| 位置 | 内容 | 说明 |
 |:---:|:---|:---|
-| **浏览器模式（推荐）** | `credit_browser.py` | 青龙容器里已有 Chromium；用账号密码自动完成登录，浏览器持久化 |
-| **Cookie 模式（备用）** | `credit_login.py` | 不想在青龙里跑浏览器；从本机导出 cookie，纯 HTTP 复用 |
+| 青龙定时任务 | `tasks/credit-linux-do/credit_browser.py` | 浏览器自动登录、查余额、发飞书通知 |
+| 本机工具 | `tools/credit-cookie/` | 页面/命令行导出 cookie，生成 `CREDIT_COOKIE_JSON`；不参与定时任务 |
 
-> 两种模式都不绕过 Cloudflare Turnstile / 人机验证。浏览器模式用真实的有头
+> 脚本不绕过 Cloudflare Turnstile / 人机验证。浏览器模式用真实的有头
 > Chromium 让 Cloudflare 的 JS 正常执行；如果 CF 要求人工点击，脚本会停止并提示。
 
 ---
 
-## 1. 浏览器模式（推荐）
+## 1. 青龙定时任务（credit_browser.py）
 
 ### 1.1 功能
 
@@ -104,7 +104,8 @@ apt-get install -y chromium
 > - 密码放在青龙环境变量里，能打开青龙面板的人都能看到；请限制面板访问权限。
 > - 建议给青龙单独使用一个高强度密码，不要和其他站点复用。
 > - 如果 linux.do 账号启用了两步验证，脚本会停在验证码页面并以退出码 2 提示，
->   需要人工完成或改用 Cookie 模式。脚本不提供绕过 2FA 的能力。
+>   需要人工完成，或用本机 Cookie 工具（第 2 节）导入登录态。脚本不提供绕过
+>   2FA 的能力。
 
 ### 1.4 新建青龙任务
 
@@ -170,47 +171,20 @@ python3 credit_browser.py --close
 - 如果 linux.do 登录页还弹 **hCaptcha**（`Human Verification` / `I am human`），
   脚本会等待它自动通过，但不会点击或破解；超时以退出码 2 停止。
 - 这时可以：
-  1. 在 Mac 的浏览器里登录 <https://credit.linux.do/balance>；
-  2. 导出会话 cookie（至少 `linux_do_credit_session_id`、`auth.session-token`，
-     建议加上 `_forum_session`、`_t`；**不要导入 `cf_clearance`**，它和本机
-     IP、User-Agent 绑定，到青龙里会失效）；
-  3. 把 JSON 放到青龙，然后执行：
-     ```bash
-     python3 credit_browser.py --import-cookies /ql/data/credit-linux-do/credit_cookies.json --check
-     ```
-     浏览器会复用这份登录态；之后仍由浏览器自己刷新 Cloudflare。
-  4. 进阶：在青龙容器里安装 noVNC，用网页 VNC 手动点一次验证。这个方案依赖较多，
+  1. 在 Mac 的 Chrome 里登录 <https://credit.linux.do/balance>；
+  2. 用本机 Cookie 工具导出登录态（见第 2 节），复制生成的 JSON；
+  3. 青龙「环境变量」新增 `CREDIT_COOKIE_JSON`，粘贴 JSON；
+  4. 重新运行 `credit_browser.py`。浏览器 profile 没有有效会话时会自动导入，
+     之后仍由浏览器自己刷新 Cloudflare；
+  5. 进阶：在青龙容器里安装 noVNC，用网页 VNC 手动点一次验证。这个方案依赖较多，
      不在本文默认步骤里。
 
-手动复制 cookie 比较麻烦，可以在 Mac 上运行仓库里的 `export_cookies.py`：
+> 至少需要 `linux_do_credit_session_id`、`auth.session-token`，建议加上
+> `_forum_session`、`_t`。**不要导入 `cf_clearance`**：它和本机 IP、User-Agent
+> 绑定，到青龙里会失效。
 
-```bash
-# 1. 用一个带调试端口的 Chrome 登录 credit（路径以你机器为准）
-"/path/to/Google Chrome" --remote-debugging-port=9222 \
-  --user-data-dir="$HOME/.credit_profile" \
-  "https://credit.linux.do/balance"
-
-# 2. 另开一个终端导出
-python3 tasks/credit-linux-do/export_cookies.py --out ~/credit_cookies.json
-```
-
-`_forum_session`、`_t`、`auth.session-token` 都是 HttpOnly cookie，
-`document.cookie` 读不到，所以不能用一个普通网页读取；脚本通过 Chrome
-DevTools Protocol 读取，输出 Cookie-Editor 兼容 JSON，文件权限 600。
-默认不导出 `cf_clearance`。
-
-不想上传文件时，可以只输出 JSON 并粘贴到青龙环境变量：
-
-```bash
-python3 tasks/credit-linux-do/export_cookies.py --stdout
-```
-
-把输出保存为青龙环境变量 `CREDIT_COOKIE_JSON`。脚本只在浏览器 profile
-没有有效会话时导入，不会覆盖后续刷新出来的新 cookie。也可以把
-`name=value; ...` 形式放到 `CREDIT_COOKIE`，但 `CREDIT_COOKIE_JSON` 优先。
-
-> `CREDIT_COOKIE_JSON` 等同于登录态，青龙面板里能看环境变量的人都能看到；
-> 请限制面板访问权限，不要截图或分享。
+不想用页面工具时，也可以用 `credit_browser.py --import-cookies` 导入一个
+Cookie-Editor JSON 文件（见 1.7）；环境变量方式更适合青龙定时任务。
 
 > 不要相信「无头浏览器自动过 CF」的说法。本脚本不做绕过验证的事。
 
@@ -398,7 +372,7 @@ curl -x http://192.168.1.2:7897 -s https://api.ipify.org; echo
 脚本不能代替你输入 2FA 验证码。可以：
 
 - 在青龙里临时关闭 2FA，登录成功后浏览器会保持会话；或
-- 改用 Cookie 模式，从已登录的浏览器导出 cookie。
+- 用本机 Cookie 工具（第 2 节）导出登录态，放到 `CREDIT_COOKIE_JSON`。
 
 **Q：日志提示「linux.do 要求验证邮箱（新设备登录）」？**
 
@@ -599,137 +573,106 @@ Cloudflare 重点挑战；`China Telecom` / `China Unicom` / `China Mobile` 等
 
 ---
 
-## 2. Cookie 模式（备用）
+## 2. 本机 Cookie 工具（tools/credit-cookie）
 
-如果不想在青龙里跑 Chromium，可以用 `credit_login.py`：它只用 Python 标准库，
-复用浏览器导出的 3 个 cookie，并在 credit 会话过期时用 Connect 会话自动走
-OAuth 续期。
+青龙定时任务不需要第二个脚本。本机工具只负责在 Mac/PC 上导出登录态，
+生成青龙环境变量 `CREDIT_COOKIE_JSON`。
 
-> Cookie 模式目前只把结果输出到任务日志，不发飞书；需要飞书余额通知请用上面的
-> 浏览器模式。
-
-### 2.1 原理
-
-| Cookie | Domain | 作用 | 有效期 |
-|---|---|---|---|
-| `linux_do_credit_session_id` | `.linux.do` | credit 站自己的会话 | 约 7 天 |
-| `cf_clearance` | `.linux.do` | Cloudflare 通行证 | 与出口 IP、UA 绑定 |
-| `auth.session-token` | `connect.linux.do` | Connect 会话，用于 OAuth 续期 | 服务端会话 |
-
-脚本每次运行先调 `/api/v1/oauth/user-info`；401 时用 `auth.session-token` 走
-`oauth/login → authorize → approve → /api/v1/oauth/callback` 换新会话。
-
-### 2.2 一次性导出 cookie
-
-1. 用 Chrome 打开 <https://credit.linux.do/balance>；
-2. 完成 Cloudflare 验证并登录；
-3. 打开开发者工具 → Application → Cookies；
-4. 复制三个 cookie 的值：
-   - `linux_do_credit_session_id`（`credit.linux.do` 或 `.linux.do`）
-   - `cf_clearance`（`.linux.do`）
-   - `auth.session-token`（`connect.linux.do`）
-5. 保存为 `credit_cookies.json`：
-
-```json
-[
-  {
-    "name": "linux_do_credit_session_id",
-    "value": "粘贴实际值",
-    "domain": ".linux.do",
-    "path": "/",
-    "expires": null
-  },
-  {
-    "name": "cf_clearance",
-    "value": "粘贴实际值",
-    "domain": ".linux.do",
-    "path": "/",
-    "expires": null
-  },
-  {
-    "name": "auth.session-token",
-    "value": "粘贴实际值",
-    "domain": "connect.linux.do",
-    "path": "/",
-    "expires": null
-  }
-]
-```
-
-6. 设置权限：
+### 2.1 页面工具（推荐）
 
 ```bash
-chmod 600 credit_cookies.json
+cd /path/to/QinglongScripts/tools/credit-cookie
+python3 cookie_tool.py
 ```
 
-### 2.3 青龙配置
+浏览器会自动打开 <http://127.0.0.1:8765/>，页面提供：
 
-把 `credit_cookies.json` 放到：
-
-```text
-/ql/data/credit-linux-do/credit_cookies.json
-```
-
-新建任务：
-
-| 配置项 | 值 |
+| 按钮 | 作用 |
 |---|---|
-| 命令 | 订阅任务：`task rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do/credit_login.py`<br>手动任务：`cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do && python3 credit_login.py` |
-| 定时 | `0 9 * * *` |
-| 超时 | ≥ 2 分钟 |
-| 并发 | 不允许并发 |
+| 启动 Chrome | 用独立 profile 启动带调试端口的 Chrome |
+| 打开登录页 | 在 Chrome 里打开 <https://credit.linux.do/balance> |
+| 读取 Cookie | 读取 HttpOnly cookie，生成 Cookie-Editor 兼容 JSON |
+| 验证登录 | 调用 user-info，显示昵称、余额、积分、待结算 |
 
-环境变量（可选）：
+流程：
+
+1. 点「启动 Chrome」；
+2. 在弹出的 Chrome 里登录 credit，完成 Cloudflare / 人机验证，直到看到余额；
+3. 回到工具页点「读取 Cookie」→「复制 JSON」；
+4. 青龙「环境变量」新增 `CREDIT_COOKIE_JSON`，粘贴 JSON；
+5. 运行 `credit_browser.py`。profile 没有有效会话时会自动导入。
+
+页面只监听 `127.0.0.1`，不上传数据；默认不导出 `cf_clearance`。
+
+### 2.2 命令行导出
+
+```bash
+cd /path/to/QinglongScripts/tools/credit-cookie
+
+python3 export_cookies.py --stdout            # 输出 JSON 到终端
+python3 export_cookies.py --out ~/credit_cookies.json
+python3 export_cookies.py --launch --stdout   # CDP 未运行时自动启动 Chrome
+```
+
+输出文件权限为 600。脚本只在本机读取 cookie，不发送到网络。
+
+### 2.3 青龙环境变量
 
 | 变量 | 说明 |
 |---|---|
-| `CREDIT_COOKIE` | `name=value; ...` 形式的 cookie |
-| `CREDIT_COOKIE_JSON` | JSON 数组/对象形式的 cookie |
-| `CREDIT_COOKIE_FILE` | 状态文件路径 |
-| `CREDIT_FORCE_ENV` | 设为 `1` 时忽略状态文件 |
-| `CREDIT_UA` | 覆盖 User-Agent |
-| `DEBUG` | 设为 `1` 输出 OAuth 调试信息 |
+| `CREDIT_COOKIE_JSON` | Cookie-Editor JSON；优先使用 |
+| `CREDIT_COOKIE` | `name=value; ...` 形式；没有 JSON 时使用 |
 
-### 2.4 退出码
+导入时机：
 
-| 退出码 | 含义 | 处理 |
-|:---:|---|---|
-| 0 | 会话有效，或自动续期成功 | 无需处理 |
-| 1 | 网络/解析等一般错误 | 看日志，稍后重试 |
-| 2 | 需要人工重新导出 cookie | 按 2.2 重新导出 |
-| 3 | Cloudflare 403（cf_clearance 失效或 IP 不一致） | 重新导出；检查出口 IP |
+- 浏览器 profile 里没有未过期的 `linux_do_credit_session_id` 时导入；
+- 查询余额返回 401 时，再尝试导入一次；
+- 不会在每次运行时覆盖浏览器刷新出来的新 cookie。
 
-### 2.5 常见问题
+### 2.4 常见问题
 
-**Q：Cloudflare 403，退出码 3？**
+**Q：工具页面打不开？**
 
-`cf_clearance` 失效，或青龙出口 IP 与导出 cookie 的电脑不一致。先在青龙里查
-公网 IP：
+确认 `cookie_tool.py` 还在运行，端口没有被占用。换端口：
 
 ```bash
-curl -s https://api.ipify.org; echo
+python3 cookie_tool.py --port 8766
 ```
 
-与导出 cookie 的电脑对比。如果不一致，让 NAS 走与电脑相同的代理，或在相同
-出口的网络里重新导出。
+**Q：连不上 Chrome CDP？**
 
-**Q：HTTP 429 / RATE_LIMITED？**
+Chrome 必须用 `--remote-debugging-port=9222` 启动。可以先打开
+<http://127.0.0.1:9222/json/version> 检查。页面工具的「启动 Chrome」会自动加这个参数。
 
-短时间重复登录触发限流。等 1–2 分钟再跑；每天一次即可。
+**Q：自动启动 Chrome 后一直等不到 CDP？**
 
-**Q：退出码 2，提示 Connect 会话已失效？**
+profile 被普通 Chrome 占用了。先完全退出那个 Chrome，或换 profile：
 
-`auth.session-token` 过期了。重新导出一次即可。
+```bash
+python3 cookie_tool.py --profile ~/.credit_profile_tool
+```
 
-**Q：只导出 credit 的两个 cookie 行不行？**
+**Q：提示没有 `linux_do_credit_session_id`？**
 
-可以查余额；但 credit 会话过期后无法自动续期，会以退出码 2 提示重新导出。
+Chrome 还没真正登录 credit。先打开 <https://credit.linux.do/balance>，
+完成验证并看到余额后再读取。
+
+**Q：为什么默认不导出 `cf_clearance`？**
+
+它和出口 IP、User-Agent 绑定。Mac 上导出的 clearance 到青龙容器里基本一定失效，
+还会干扰浏览器重新过 Cloudflare。让容器里的浏览器自己完成挑战即可。
+
+**Q：导出后多久需要重新导出？**
+
+`linux_do_credit_session_id` 约 7 天；`auth.session-token` 有效时，浏览器会尽量
+自己续期。余额查询提示 401 且无法续期时，重新导出一次即可。
 
 ---
 
 ## 3. 数据与安全
 
-- 浏览器 profile、`credit_cookies.json` 都等同于账号登录态；
+- 浏览器 profile、`credit_cookies.json`、`CREDIT_COOKIE_JSON` 都等同于账号登录态；
+- 本机 Cookie 工具只监听 `127.0.0.1`，生成的 JSON 不要截图或分享；
 - 飞书 Webhook URL、签名密钥同样是凭据，不要提交 Git 或分享；
 - profile 目录权限建议 `700`，cookie 文件权限 `600`；
 - 不要提交 Git、不要分享、不要发到群里；
