@@ -106,7 +106,7 @@ apt-get install -y chromium
 
 | 配置项 | 值 |
 |---|---|
-| 命令 | `cd /ql/data/scripts/QinglongScripts/tasks/credit-linux-do && python3 credit_browser.py` |
+| 命令 | 订阅任务：`task rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do/credit_browser.py`<br>手动任务：`cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do && python3 credit_browser.py` |
 | 定时 | `0 9 * * *`（每天 9 点，可按需修改） |
 | 超时 | 建议 ≥ 5 分钟（首次登录要等 Cloudflare 和页面加载） |
 | 并发 | 不允许并发 |
@@ -147,7 +147,7 @@ apt-get install -y chromium
 浏览器会保持运行，profile 持久化；下次任务直接复用。需要停止浏览器：
 
 ```bash
-cd /ql/data/scripts/QinglongScripts/tasks/credit-linux-do
+cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do
 python3 credit_browser.py --close
 ```
 
@@ -233,7 +233,7 @@ linux.do 登录失败：账号或密码不正确，或触发了风控。
 示例：
 
 ```bash
-cd /ql/data/scripts/QinglongScripts/tasks/credit-linux-do
+cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do
 
 # 只检查
 python3 credit_browser.py --check
@@ -319,6 +319,23 @@ CDP 地址，或先停掉占用端口的程序。
 
 默认 `/ql/data/credit-linux-do/browser-profile`。这个目录等同于登录态，权限
 应为 `700`，不要提交 Git、不要分享。
+
+**Q：日志提示 `BrowserType.connect_over_cdp: Timeout 30000ms exceeded`？**
+
+说明复用到了一个无响应的旧 Chromium。脚本会自动清理并重新启动；也可以手动处理：
+
+```bash
+cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do
+python3 credit_browser.py --close
+python3 credit_browser.py
+```
+
+如果还不行，检查 9222 是否被别的程序占用：
+
+```bash
+ss -lntp | grep 9222
+ps -ef | grep -i '[c]hrom'
+```
 
 **Q：怎么没收到飞书通知？**
 
@@ -413,7 +430,7 @@ chmod 600 credit_cookies.json
 
 | 配置项 | 值 |
 |---|---|
-| 命令 | `cd /ql/data/scripts/QinglongScripts/tasks/credit-linux-do && python3 credit_login.py` |
+| 命令 | 订阅任务：`task rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do/credit_login.py`<br>手动任务：`cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do && python3 credit_login.py` |
 | 定时 | `0 9 * * *` |
 | 超时 | ≥ 2 分钟 |
 | 并发 | 不允许并发 |

@@ -304,16 +304,31 @@ def start_chromium(profile_dir: Path) -> str:
         return external.rstrip("/")
 
     state_path = runtime_dir() / "cdp_url"
+    pid_path = runtime_dir() / "chromium.pid"
     if state_path.is_file():
         saved = state_path.read_text().strip()
         saved_port = parse.urlparse(saved).port
+        saved_ok = False
         if saved_port and cdp_version(saved_port):
+            try:
+                pid = int(pid_path.read_text().strip())
+            except (OSError, ValueError):
+                pid = 0
+            if pid:
+                cmdline = pid_cmdline(pid)
+                saved_ok = (
+                    f"--remote-debugging-port={saved_port}" in cmdline
+                    and str(profile_dir) in cmdline
+                )
+        if saved_ok:
             log(f"[*] 复用上次启动的 Chromium（CDP {saved_port}）")
             return saved
-        try:
-            state_path.unlink()
-        except OSError:
-            pass
+        log("[!] 上次的 Chromium 状态无效，重新启动 …")
+        for path in (state_path, pid_path):
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     base_port = int(os.getenv("CREDIT_CDP_PORT", str(DEFAULT_CDP_PORT)))
     port = None
@@ -380,26 +395,59 @@ def start_chromium(profile_dir: Path) -> str:
     )
 
 
+def pid_cmdline(pid: int) -> str:
+    """返回进程命令行；Linux 读 /proc，macOS 回退到 ps。"""
+    proc = Path(f"/proc/{pid}/cmdline")
+    if proc.is_file():
+        try:
+            return proc.read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            return ""
+    try:
+        return subprocess.check_output(
+            ["ps", "-p", str(pid), "-o", "command="],
+            text=True,
+            timeout=2,
+        ).strip()
+    except Exception:
+        return ""
+
+
 def _kill_pid_file(path: Path, expect: str) -> None:
     if not path.is_file():
         return
     try:
         pid = int(path.read_text().strip())
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
-        cmdline = cmdline.replace(b"\0", b" ").decode("utf-8", "replace")
-        if expect in cmdline:
-            os.kill(pid, signal.SIGTERM)
-            log(f"[+] 已停止进程 {pid}")
     except (OSError, ValueError):
-        pass
+        pid = 0
+    if pid:
+        cmdline = pid_cmdline(pid)
+        if expect in cmdline:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                log(f"[+] 已停止进程 {pid}")
+                for _ in range(30):
+                    try:
+                        os.kill(pid, 0)
+                    except OSError:
+                        break
+                    time.sleep(0.1)
+                else:
+                    os.kill(pid, signal.SIGKILL)
+                    log(f"[+] 已强制停止进程 {pid}")
+            except OSError:
+                pass
     try:
         path.unlink()
     except OSError:
         pass
 
 
-def close_browser() -> None:
-    _kill_pid_file(runtime_dir() / "chromium.pid", str(default_profile_dir()))
+def close_browser(profile_dir: Optional[Path] = None) -> None:
+    _kill_pid_file(
+        runtime_dir() / "chromium.pid",
+        str(profile_dir or default_profile_dir()),
+    )
     _kill_pid_file(runtime_dir() / "xvfb.pid", "Xvfb")
     try:
         (runtime_dir() / "cdp_url").unlink()
@@ -433,13 +481,24 @@ class BrowserSession:
     def __enter__(self):
         sync_playwright = load_playwright()
         self.pw = sync_playwright().start()
-        self.browser = self.pw.chromium.connect_over_cdp(self.cdp_url)
-        if self.browser.contexts:
-            self.ctx = self.browser.contexts[0]
-        else:
-            self.ctx = self.browser.new_context()
-        self.page = self._pick_page()
-        return self
+        try:
+            self.browser = self.pw.chromium.connect_over_cdp(
+                self.cdp_url, timeout=20000
+            )
+            if self.browser.contexts:
+                self.ctx = self.browser.contexts[0]
+            else:
+                self.ctx = self.browser.new_context()
+            self.page = self._pick_page()
+            return self
+        except Exception:
+            if self.pw:
+                try:
+                    self.pw.stop()
+                except Exception:
+                    pass
+                self.pw = None
+            raise
 
     def _pick_page(self):
         for page in self.ctx.pages:
@@ -1198,10 +1257,22 @@ def run(args) -> int:
     username = os.getenv("LINUXDO_USERNAME", "").strip()
     password = os.getenv("LINUXDO_PASSWORD", "")
 
-    profile_dir = Path(args.profile_dir) if args.profile_dir else default_profile_dir()
+    if args.profile_dir:
+        profile_dir = Path(args.profile_dir).expanduser().resolve()
+    else:
+        profile_dir = default_profile_dir()
     cdp_url = start_chromium(profile_dir)
 
-    with BrowserSession(cdp_url) as session:
+    with contextlib.ExitStack() as stack:
+        try:
+            session = stack.enter_context(BrowserSession(cdp_url))
+        except Exception as exc:  # noqa: BLE001
+            log(f"[!] 连接 Chromium 失败：{exc}")
+            log("[*] 清理旧浏览器并重新启动 …")
+            close_browser(profile_dir)
+            cdp_url = start_chromium(profile_dir)
+            session = stack.enter_context(BrowserSession(cdp_url))
+
         page = session.page
         if args.import_cookies:
             import_cookies(session.ctx, args.import_cookies)
