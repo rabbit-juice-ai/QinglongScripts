@@ -403,6 +403,31 @@ getent hosts credit.linux.do
 `127.0.0.1` 在容器里指的是容器自己，不是宿主机。宿主机代理请用 NAS 的
 局域网 IP，例如 `http://192.168.1.2:7897`。
 
+**Q：日志提示「按钮点击后没有跳转」或 `/api/v1/oauth/login 返回 HTTP 403`？**
+
+脚本现在会先等待 credit 的 Cloudflare 挑战结束，再点击登录；如果按钮点击后
+没有跳转，会直接调用同一个 OAuth 接口继续，不会卡在登录页。
+
+如果仍然失败，重点看错误里的 HTTP 状态：
+
+- `HTTP 403` 且页面是 `Just a moment...`：**Cloudflare 拦截**，不是账号密码错误。
+  `cf_clearance` 和出口 IP 绑定，换代理 IP 后旧 cookie 会失效。检查代理出口 IP
+  是否稳定：
+
+  ```bash
+  curl -x http://192.168.1.2:7897 -s https://api.ipify.org; echo
+  curl -x http://192.168.1.2:7897 -s https://api.ipify.org; echo
+  ```
+
+  两次 IP 不一样，说明代理在轮换，Cloudflare 会持续挑战。换稳定代理，或让
+  容器直连（`CREDIT_BROWSER_PROXY=none`）。
+
+- `HTTP 401`：会话无效，属于正常登录流程；
+- 其他状态：看返回内容，通常是代理/网关返回的错误页。
+
+脚本不会绕过 Cloudflare；它只是用真实有头 Chromium 等挑战自然通过。如果
+挑战要求人工点击，会以退出码 3 停止。
+
 **Q：怎么没收到飞书通知？**
 
 按日志检查：

@@ -897,19 +897,23 @@ def wait_for_login_or_authorize(page, timeout: int) -> Optional[str]:
     """等待页面进入 linux.do 登录表单、Connect 授权页或 credit 回调页。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
+        if is_error_page(page):
+            detail = page_error_detail(page)
+            raise CreditError(
+                f"登录跳转失败：{detail or 'Chromium 错误页'}\n"
+                "这是 Chromium 网络层错误，请检查代理是否允许 "
+                "connect.linux.do 和 linux.do。"
+            )
         url = page.url
         if "connect.linux.do/oauth2/authorize" in url:
             return "authorize"
         if "credit.linux.do/login?code=" in url or "credit.linux.do/balance" in url:
             return "credit"
-        try:
-            form_ready = bool(
-                page.query_selector("#login-account-name, #signin_username")
-            )
-        except Exception:
-            # 页面正在导航，下一轮再判断。
-            form_ready = False
-        if "linux.do/login" in url and form_ready:
+        parsed = parse.urlparse(url)
+        if parsed.netloc == "linux.do" and (
+            parsed.path.startswith("/login")
+            or parsed.path.startswith("/session/sso_provider")
+        ):
             return "login"
         page.wait_for_timeout(500)
     return None
@@ -1183,6 +1187,125 @@ def finish_oauth(page) -> dict:
     raise NeedManual("OAuth 流程完成，但 credit 会话仍然无效。")
 
 
+def wait_credit_api_ready(page, timeout: int = CF_TIMEOUT) -> None:
+    """等待 credit 的 Cloudflare 挑战结束（API 不再返回挑战页）。"""
+    deadline = time.time() + timeout
+    last_status = None
+    last_text = ""
+    while time.time() < deadline:
+        try:
+            result = page.evaluate(
+                """async () => {
+                  const r = await fetch('/api/v1/oauth/user-info', {
+                    headers: {
+                      'Accept': 'application/json, text/plain, */*',
+                      'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include',
+                    referrer: location.href
+                  });
+                  return {status: r.status, text: (await r.text()).slice(0, 300)};
+                }"""
+            )
+        except Exception as exc:  # noqa: BLE001
+            if not is_navigation_error(exc):
+                raise
+            page.wait_for_timeout(1000)
+            continue
+
+        status = int(result.get("status", 0))
+        last_status = status
+        last_text = str(result.get("text", ""))
+        if status in (200, 401):
+            debug(f"credit API 已就绪（HTTP {status}）")
+            return
+        challenge = status == 403 and (
+            "Just a moment" in last_text
+            or "challenge" in last_text.lower()
+            or "<html" in last_text.lower()
+        )
+        if challenge:
+            debug("credit API 仍在 Cloudflare 挑战中，等待 …")
+            page.wait_for_timeout(2000)
+            continue
+        raise CreditError(
+            f"credit API 返回 HTTP {status}：{last_text[:200]}"
+        )
+
+    raise CloudflareBlocked(
+        f"Cloudflare 挑战没有通过（credit API 持续返回 HTTP {last_status}）。"
+        "脚本不会绕过验证；请检查代理出口 IP，或稍后重试。"
+    )
+
+
+def terms_checked(page) -> bool:
+    try:
+        return bool(
+            page.eval_on_selector(
+                "#terms",
+                "e => e.getAttribute('aria-checked') === 'true'"
+                " || e.getAttribute('data-state') === 'checked'",
+            )
+        )
+    except Exception:
+        return False
+
+
+def oauth_login_url(page) -> str:
+    """直接调用登录按钮背后的 OAuth 接口，返回 connect.linux.do 授权地址。"""
+    result = None
+    last_exc = None
+    for attempt in range(3):
+        try:
+            result = page.evaluate(
+                """async () => {
+                  const r = await fetch('/api/v1/oauth/login', {
+                    headers: {
+                      'Accept': 'application/json, text/plain, */*',
+                      'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include',
+                    referrer: location.href
+                  });
+                  return {status: r.status, text: await r.text()};
+                }"""
+            )
+            break
+        except Exception as exc:  # noqa: BLE001
+            if not is_navigation_error(exc):
+                raise
+            last_exc = exc
+            debug(f"OAuth 接口页面导航中，重试 {attempt + 1}/3")
+            page.wait_for_timeout(1000)
+    if result is None:
+        raise CreditError(f"调用 OAuth 登录接口时页面持续导航：{last_exc}")
+
+    status = int(result.get("status", 0))
+    text = str(result.get("text", ""))
+    if status != 200:
+        hint = ""
+        if status == 403:
+            hint = (
+                "\n这是 Cloudflare 拦截，不是账号密码错误。"
+                "请检查代理出口 IP，或稍后重试。"
+            )
+        raise CreditError(
+            f"/api/v1/oauth/login 返回 HTTP {status}：{text[:300]}{hint}"
+        )
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CreditError(
+            f"/api/v1/oauth/login 返回非 JSON：{text[:300]}"
+        ) from exc
+    url = payload.get("data")
+    if not isinstance(url, str) or not url.startswith(
+        "https://connect.linux.do/oauth2/authorize"
+    ):
+        raise CreditError(f"/api/v1/oauth/login 返回异常：{text[:300]}")
+    return url
+
+
 def login(page, username: str, password: str) -> None:
     log("[*] credit 会话无效，开始自动登录 …")
     goto(page, LOGIN_URL)
@@ -1206,29 +1329,92 @@ def login(page, username: str, password: str) -> None:
             raise CloudflareBlocked("credit 登录页被 Cloudflare 拦截。")
         raise NeedManual("credit 登录页没有渲染出登录按钮，页面可能改版。")
 
+    # 页面渲染不代表 Cloudflare 已经放行 API；先等 API 可访问再点登录。
+    wait_credit_api_ready(page)
+    if "/balance" in page.url:
+        log("[+] 已经登录")
+        return
+
     terms = page.query_selector("#terms")
     if terms:
-        checked = page.eval_on_selector(
-            "#terms", "e => e.getAttribute('aria-checked') === 'true'"
-        )
-        if not checked:
-            terms.click()
+        if terms_checked(page):
+            log("[+] 服务条款已勾选")
+        else:
+            try:
+                terms.click()
+            except Exception as exc:  # noqa: BLE001
+                debug(f"点击服务条款失败：{type(exc).__name__}")
             page.wait_for_timeout(300)
-            log("[+] 已勾选服务条款")
+            if not terms_checked(page):
+                try:
+                    terms.evaluate("e => e.click()")
+                except Exception:
+                    pass
+                page.wait_for_timeout(300)
+            if terms_checked(page):
+                log("[+] 已勾选服务条款")
+            else:
+                raise NeedManual(
+                    "服务条款勾选失败，登录按钮不会生效。"
+                    "请检查页面是否被遮挡或已改版。"
+                )
+    else:
+        log("[!] 没有找到服务条款复选框，继续尝试登录 …")
 
     button = page.query_selector("button:has-text('使用 LINUX DO 登录')")
     if not button:
         button = page.query_selector("button:has-text('LINUX DO')")
     if not button:
         raise NeedManual("登录页没有找到「使用 LINUX DO 登录」按钮，页面可能已改版。")
+    try:
+        enabled = button.is_enabled()
+    except Exception:
+        enabled = True
+    if not enabled:
+        raise NeedManual(
+            "「使用 LINUX DO 登录」按钮是禁用状态，可能服务条款没有勾选成功。"
+        )
     log("[*] 点击「使用 LINUX DO 登录」…")
-    button.click()
+    failed_requests = []
 
-    target = wait_for_login_or_authorize(page, LOGIN_TIMEOUT)
+    def _on_request_failed(request):
+        parsed = parse.urlparse(request.url)
+        if parsed.netloc.lower() in ("linux.do", "connect.linux.do"):
+            failed_requests.append(
+                f"{parsed.netloc}{parsed.path}：{request.failure or 'unknown'}"
+            )
+
+    page.on("requestfailed", _on_request_failed)
+    try:
+        button.click()
+
+        target = wait_for_login_or_authorize(page, 20)
+        if target is None and not on_credit(page):
+            # 点击可能已经触发跳转，只是还没提交；再给一点时间。
+            target = wait_for_login_or_authorize(page, 10)
+        if target is None:
+            # 按钮的点击事件偶尔不触发跳转（前端报错/被代理拦截）。
+            # 直接调用同一个 OAuth 接口，拿到授权地址后继续，流程不变。
+            log("[!] 按钮点击后没有跳转，尝试直接调用 OAuth 登录接口 …")
+            oauth_url = oauth_login_url(page)
+            debug(f"OAuth 地址：{oauth_url[:120]}…")
+            goto(page, oauth_url)
+            target = wait_for_login_or_authorize(page, LOGIN_TIMEOUT)
+    finally:
+        try:
+            page.remove_listener("requestfailed", _on_request_failed)
+        except Exception:
+            pass
+
     if target is None:
         if not wait_cloudflare(page):
             raise CloudflareBlocked("点击登录后 Cloudflare 没有放行。")
-        raise NeedManual(f"点击登录后没有跳转，当前地址：{page.url}")
+        extra = ""
+        if failed_requests:
+            extra = "\n失败的请求：" + "；".join(failed_requests[-5:])
+        raise NeedManual(
+            f"点击登录后没有跳转，当前地址：{page.url}{extra}"
+        )
 
     if target == "login":
         do_linuxdo_login(page, username, password)
