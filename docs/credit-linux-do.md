@@ -368,6 +368,20 @@ curl -x http://192.168.1.2:7897 -s https://api.ipify.org; echo
 
 去邮箱完成验证，然后重新运行。浏览器 profile 会保留这次登录，后续一般不会再要求。
 
+**Q：日志提示「linux.do 登录后没有跳转」？**
+
+新版本会输出页面文字、最近的 POST/4xx 响应、失败请求和表单状态，并保存
+`/ql/data/credit-linux-do/logs/linuxdo-login-*.png`。按日志判断：
+
+- 页面文字含「安全验证」「风控」「请稍后再试」：出口 IP 被 linux.do 风控。
+  换住宅 IP，或直连（`CREDIT_BROWSER_PROXY=none`）；
+- `最近响应：HTTP 403 https://linux.do/session`：登录 POST 被 Cloudflare 或
+  风控拦截，同上处理；
+- `HTTP 429`：登录太频繁，等 10–30 分钟再试，不要连续跑；
+- 页面文字含「验证邮箱」「verification code」：去邮箱完成验证；
+- 没有 POST 响应，或 `按钮=禁用`：页面还没准备好，检查 Turnstile token 长度
+  是否大于 20；可以调大 `CREDIT_LOGIN_TIMEOUT`。
+
 **Q：会不会每天重新登录？**
 
 不会。浏览器 profile 持久化，credit 会话约 7 天有效；只有会话失效时才重新走

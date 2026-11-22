@@ -1272,10 +1272,74 @@ def has_email_verification(page) -> bool:
         "检查您的邮箱",
         "验证您的电子邮件",
         "确认您的电子邮件",
+        "电子邮件验证",
+        "邮箱验证",
+        "验证邮件",
         "check your email",
         "verify your email",
+        "verification email",
+        "verification code",
     )
     return any(needle in text.lower() for needle in needles)
+
+
+def _sanitize_page_text(text: str, username: str) -> str:
+    text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", text)
+    if username and len(username) >= 3:
+        text = text.replace(username, "<username>")
+    return text
+
+
+def login_diagnostics(
+    page,
+    username: str,
+    responses: list[dict],
+    failures: list[str],
+) -> None:
+    """linux.do 登录没有跳转时输出页面与网络状态；不输出密码。"""
+    log(f"[!] linux.do 登录后仍停留在：{page.url}")
+    title = page_title(page)
+    if title:
+        log(f"[!] 页面标题：{title!r}")
+
+    try:
+        text = " ".join(page.inner_text("body").split())
+    except Exception:
+        text = ""
+    snippet = _sanitize_page_text(text, username)[:400]
+    if snippet:
+        log(f"[!] 页面文字：{snippet}")
+
+    for item in responses[-6:]:
+        log(f"[!] 最近响应：HTTP {item['status']} {item['url'][:120]}")
+    for item in failures[-4:]:
+        log(f"[!] 失败请求：{item[:160]}")
+
+    try:
+        state = page.evaluate(
+            """() => {
+              const btn = document.querySelector('#login-button, #signin-button');
+              const input = document.querySelector('input[name="cf-turnstile-response"]');
+              return {
+                hasButton: !!btn,
+                buttonDisabled: btn ? !!btn.disabled : null,
+                tokenLen: input ? (input.value || '').length : -1,
+                hasPassword: !!document.querySelector(
+                  '#login-account-password, #signin_password'
+                ),
+              };
+            }"""
+        )
+        log(
+            f"[!] 表单状态：按钮={'有' if state.get('hasButton') else '无'}"
+            f"（{'禁用' if state.get('buttonDisabled') else '可点'}），"
+            f"密码框={'有' if state.get('hasPassword') else '无'}，"
+            f"Turnstile token 长度={state.get('tokenLen')}"
+        )
+    except Exception:
+        pass
+
+    save_debug_screenshot(page, "linuxdo-login")
 
 
 def do_linuxdo_login(page, username: str, password: str) -> None:
@@ -1325,29 +1389,74 @@ def do_linuxdo_login(page, username: str, password: str) -> None:
         )
     log("[+] Cloudflare Turnstile 已通过")
 
-    if page.query_selector("#login-button"):
+    responses: list[dict] = []
+    failures: list[str] = []
+
+    def on_response(response) -> None:
         try:
-            page.wait_for_selector("#login-button:not([disabled])", timeout=10000)
+            url = response.url
+            if "linux.do" not in url and "connect.linux.do" not in url:
+                return
+            if response.request.method == "POST" or response.status >= 400:
+                responses.append({"url": url, "status": response.status})
+                if len(responses) > 20:
+                    del responses[:10]
         except Exception:
             pass
-        page.click("#login-button")
-    else:
-        page.click("#signin-button")
 
-    deadline = time.time() + LOGIN_TIMEOUT
-    while time.time() < deadline:
-        if "linux.do/login" not in page.url:
-            log("[+] linux.do 登录成功")
-            return
-        if has_2fa(page):
-            raise NeedManual("该 linux.do 账号启用了两步验证，需要人工完成。")
-        if has_email_verification(page):
-            raise NeedManual("linux.do 要求验证邮箱（新设备登录），请先在邮箱里完成验证。")
-        if has_login_error(page):
-            raise LoginFailed("linux.do 登录失败：账号或密码不正确，或触发了风控。")
-        page.wait_for_timeout(500)
+    def on_failed(request) -> None:
+        try:
+            url = request.url
+            if "linux.do" not in url and "connect.linux.do" not in url:
+                return
+            failures.append(f"{request.method} {url} {request.failure or ''}")
+            if len(failures) > 10:
+                del failures[:5]
+        except Exception:
+            pass
 
-    raise NeedManual("linux.do 登录后没有跳转，可能触发了风控或需要人工验证。")
+    page.on("response", on_response)
+    page.on("requestfailed", on_failed)
+    try:
+        if page.query_selector("#login-button"):
+            try:
+                page.wait_for_selector(
+                    "#login-button:not([disabled])", timeout=10000
+                )
+            except Exception:
+                pass
+            page.click("#login-button")
+        else:
+            page.click("#signin-button")
+
+        deadline = time.time() + LOGIN_TIMEOUT
+        while time.time() < deadline:
+            if "linux.do/login" not in page.url:
+                log("[+] linux.do 登录成功")
+                return
+            if has_2fa(page):
+                raise NeedManual("该 linux.do 账号启用了两步验证，需要人工完成。")
+            if has_email_verification(page):
+                raise NeedManual(
+                    "linux.do 要求验证邮箱（新设备登录），请先在邮箱里完成验证。"
+                )
+            if has_login_error(page):
+                raise LoginFailed(
+                    "linux.do 登录失败：账号或密码不正确，或触发了风控。"
+                )
+            page.wait_for_timeout(500)
+
+        login_diagnostics(page, username, responses, failures)
+        raise NeedManual("linux.do 登录后没有跳转，可能触发了风控或需要人工验证。")
+    finally:
+        for event, handler in (
+            ("response", on_response),
+            ("requestfailed", on_failed),
+        ):
+            try:
+                page.remove_listener(event, handler)
+            except Exception:
+                pass
 
 
 def handle_authorize(page) -> None:
