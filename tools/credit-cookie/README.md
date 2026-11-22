@@ -113,6 +113,12 @@ Chrome，或换一个 profile：
 python3 cookie_tool.py --profile ~/.credit_profile_tool
 ```
 
+**Q：Chrome 明明开着，却提示 `Browser context management is not supported`？**
+
+Chrome 进程还在，但所有窗口/标签页都被关掉了。Playwright 无法在这种状态下
+建立浏览器上下文。工具会自动通过 `/json/new` 补一个页面；也可以点页面上的
+「启动 Chrome」恢复。如果仍然失败，完全退出 Chrome 后重新启动调试实例。
+
 **Q：提示没有 `linux_do_credit_session_id`？**
 
 说明 Chrome 还没真正登录 credit。先在 Chrome 里打开

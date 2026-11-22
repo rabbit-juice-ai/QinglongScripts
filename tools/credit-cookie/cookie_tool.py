@@ -215,6 +215,9 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     def _launch(self) -> dict:
+        # 页面会带一个空的 JSON body；不读掉会残留在 keep-alive 连接里，
+        # 导致下一次请求被解析成 "{}GET ..."。
+        self._read_json()
         with BROWSER_LOCK:
             result = launch_chrome(
                 CONFIG["cdp"],

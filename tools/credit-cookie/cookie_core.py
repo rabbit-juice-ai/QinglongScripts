@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 from urllib import request
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 DEFAULT_CDP = os.getenv("CREDIT_CDP_URL", "http://127.0.0.1:9222")
 DEFAULT_PROFILE = Path(
@@ -120,14 +120,42 @@ def _playwright():
     return sync_playwright
 
 
+def ensure_page_target(
+    cdp_url: str = DEFAULT_CDP,
+    url: str = "about:blank",
+    force: bool = False,
+) -> bool:
+    """Chrome 没有页面时，Playwright 无法建立 context；用 /json/new 建一个。"""
+    if not force and page_targets(cdp_url):
+        return False
+    endpoint = cdp_url.rstrip("/") + "/json/new?" + quote(url, safe=":/?=&")
+    try:
+        req = request.Request(endpoint, method="PUT")
+        with _no_proxy_opener().open(req, timeout=5) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
 def _connect(pw, cdp_url: str):
+    ensure_page_target(cdp_url)
     try:
         browser = pw.chromium.connect_over_cdp(cdp_url)
     except Exception as exc:
-        raise ToolError(
-            f"连接 Chrome CDP 失败：{cdp_url}\n{exc}\n"
-            "请确认 Chrome 是用 --remote-debugging-port 启动的。"
-        )
+        if "Browser context management is not supported" not in str(exc):
+            raise ToolError(
+                f"连接 Chrome CDP 失败：{cdp_url}\n{exc}\n"
+                "请确认 Chrome 是用 --remote-debugging-port 启动的。"
+            )
+        ensure_page_target(cdp_url, force=True)
+        try:
+            browser = pw.chromium.connect_over_cdp(cdp_url)
+        except Exception as retry_exc:
+            raise ToolError(
+                f"连接 Chrome CDP 失败：{cdp_url}\n{retry_exc}\n"
+                "Chrome 可能已经没有可用窗口。请完全退出 Chrome，"
+                "再重新启动调试实例。"
+            )
     if not browser.contexts:
         raise ToolError("Chrome 没有可用的浏览器上下文。")
     return browser.contexts[0]
@@ -144,10 +172,8 @@ def read_cookies(
     wanted = CORE | EXTRA | (OPTIONAL if include_cf else set())
     sync_playwright = _playwright()
     with sync_playwright() as pw:
-        browser = pw.chromium.connect_over_cdp(cdp_url)
-        if not browser.contexts:
-            raise ToolError("Chrome 没有可用的浏览器上下文。")
-        raw = browser.contexts[0].cookies(URLS)
+        ctx = _connect(pw, cdp_url)
+        raw = ctx.cookies(URLS)
 
     seen: set[str] = set()
     cookies: list[dict] = []
@@ -284,7 +310,14 @@ def launch_chrome(
 ) -> dict:
     """启动一个带调试端口的独立 Chrome；已在运行则直接返回。"""
     if cdp_alive(cdp_url):
-        return {"launched": False, "reason": "CDP 已在运行"}
+        if page_targets(cdp_url):
+            return {"launched": False, "reason": "CDP 已在运行"}
+        if ensure_page_target(cdp_url, url):
+            return {"launched": False, "reason": "CDP 已在运行，已打开新页面"}
+        raise ToolError(
+            "Chrome 的 CDP 在运行，但没有任何页面，也无法创建新页面。\n"
+            "请完全退出 Chrome 后重试，或重启这个调试实例。"
+        )
 
     parsed = urlparse(cdp_url)
     host = parsed.hostname or "127.0.0.1"

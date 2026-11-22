@@ -661,6 +661,12 @@ profile 被普通 Chrome 占用了。先完全退出那个 Chrome，或换 profi
 python3 cookie_tool.py --profile ~/.credit_profile_tool
 ```
 
+**Q：Chrome 明明开着，却提示 `Browser context management is not supported`？**
+
+Chrome 进程还在，但所有窗口/标签页都被关掉了，Playwright 无法建立浏览器
+上下文。工具会自动创建一个新页面恢复；也可以点「启动 Chrome」。仍失败时，
+完全退出 Chrome 后重新启动调试实例。
+
 **Q：提示没有 `linux_do_credit_session_id`？**
 
 Chrome 还没真正登录 credit。先打开 <https://credit.linux.do/balance>，

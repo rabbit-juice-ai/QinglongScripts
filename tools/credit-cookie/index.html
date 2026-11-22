@@ -433,7 +433,9 @@
       data.version && data.version.browser ? data.version.browser : "—";
     $("profile-path").textContent = data.profile || "—";
     $("chrome-path").textContent = data.chrome || "未找到";
-    $("btn-launch").disabled = data.cdp || state.busy;
+    // CDP 在运行但没有页面时，Playwright 连不上；此时允许点“启动 Chrome”恢复。
+    const hasPages = (data.pages || []).length > 0;
+    $("btn-launch").disabled = (data.cdp && hasPages) || state.busy;
 
     const list = $("page-list");
     list.textContent = "";
@@ -540,7 +542,7 @@
     setBusy($("btn-launch"), true, "启动中…");
     try {
       const data = await api("/api/launch", {});
-      toast(data.launched ? "Chrome 已启动" : "Chrome 已在运行");
+      toast(data.reason || (data.launched ? "Chrome 已启动" : "Chrome 已在运行"));
       setTimeout(refreshStatus, 1200);
     } catch (err) {
       toast(err.message);
