@@ -116,6 +116,10 @@
   .pages .ptitle { font-weight: 600; }
   .pages .purl { color: var(--muted); margin-left: 8px; }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .actions.secondary { margin-top: 10px; }
+  .actions-hint { color: var(--muted); font-size: 13px; }
+  .json-hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+  .profile-hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
   button {
     appearance: none;
     border: 1px solid var(--line);
@@ -293,6 +297,8 @@
         <div class="value" id="chrome-path">—</div>
       </div>
     </div>
+    <p class="profile-hint">工具读取的是上面这个独立 profile，不是你日常使用的
+      Chrome。若只读到 credit 会话，请点「打开 linux.do」在这个 Chrome 里登录。</p>
     <ul class="pages" id="page-list"></ul>
   </section>
 
@@ -306,6 +312,11 @@
       <label class="check" title="cf_clearance 与出口 IP、UA 绑定，通常不需要导出">
         <input type="checkbox" id="include-cf"> 包含 cf_clearance（不推荐）
       </label>
+    </div>
+    <div class="actions secondary">
+      <button id="btn-open-linuxdo">打开 linux.do</button>
+      <button id="btn-open-connect">打开 connect</button>
+      <span class="actions-hint">缺少 _forum_session / auth.session-token 时，用这两个页面补全登录态</span>
     </div>
     <div class="login-result" id="login-result"></div>
   </section>
@@ -325,6 +336,9 @@
       <tbody id="cookie-rows"></tbody>
     </table>
     <ul class="warnings" id="warnings"></ul>
+    <p class="json-hint">下面的 JSON 就是可粘贴到青龙的 <code>CREDIT_COOKIE_JSON</code>，
+      包含当前 Chrome 里所有相关 cookie。缺失项需要先在 Chrome 登录对应站点，
+      工具无法凭空生成。</p>
     <div class="json-box">
       <textarea id="json-out" readonly spellcheck="false"
         placeholder="点击「读取 Cookie」生成 JSON"></textarea>
@@ -344,6 +358,9 @@
       <li>点 <b>启动 Chrome</b>。工具会用独立 profile 启动一个带调试端口的 Chrome。</li>
       <li>在打开的 Chrome 里登录 <b>credit.linux.do/balance</b>，完成 Cloudflare
         或人机验证，直到能看到余额。</li>
+      <li>如果只读到 <code>linux_do_credit_session_id</code>，先点 <b>打开 linux.do</b>
+        登录，再点 <b>打开 connect</b>，然后重新读取。这样 JSON 才会包含
+        <code>_forum_session</code>、<code>_t</code> 和 <code>auth.session-token</code>。</li>
       <li>回到本页点 <b>读取 Cookie</b>，再点 <b>复制 JSON</b>。</li>
       <li>在青龙「环境变量」新增 <code>CREDIT_COOKIE_JSON</code>，粘贴 JSON。</li>
       <li>青龙定时任务只需要 <code>credit_browser.py</code>；脚本在 profile
@@ -395,7 +412,7 @@
 
   function setBusy(button, busy, label) {
     state.busy = busy;
-    ["btn-launch", "btn-open", "btn-read", "btn-check"].forEach((id) => {
+    ["btn-launch", "btn-open", "btn-open-linuxdo", "btn-open-connect", "btn-read", "btn-check"].forEach((id) => {
       $(id).disabled = busy;
     });
     if (button) {
@@ -420,7 +437,7 @@
 
   function renderStatus(data) {
     hideBanner();
-    ["btn-open", "btn-read", "btn-check"].forEach((id) => {
+    ["btn-open", "btn-open-linuxdo", "btn-open-connect", "btn-read", "btn-check"].forEach((id) => {
       $(id).disabled = state.busy;
     });
     const dot = $("cdp-state");
@@ -453,7 +470,7 @@
     } catch (err) {
       showBanner();
       $("cdp-state").textContent = "本地工具未连接";
-      ["btn-launch", "btn-open", "btn-read", "btn-check"].forEach((id) => {
+      ["btn-launch", "btn-open", "btn-open-linuxdo", "btn-open-connect", "btn-read", "btn-check"].forEach((id) => {
         $(id).disabled = true;
       });
     }
@@ -551,20 +568,20 @@
     }
   }
 
-  async function openLogin() {
+  function openUrlInChrome(url, button) {
     if (state.busy) return;
-    setBusy($("btn-open"), true, "打开中…");
-    try {
-      const data = await api("/api/open", {
-        url: "https://credit.linux.do/balance",
-      });
-      toast("已在 Chrome 打开：" + (data.title || data.url));
-      setTimeout(refreshStatus, 800);
-    } catch (err) {
-      toast(err.message);
-    } finally {
-      setBusy($("btn-open"), false);
-    }
+    setBusy(button, true, "打开中…");
+    api("/api/open", { url })
+      .then((data) => {
+        toast("已在 Chrome 打开：" + (data.title || data.url));
+        setTimeout(refreshStatus, 800);
+      })
+      .catch((err) => toast(err.message))
+      .finally(() => setBusy(button, false));
+  }
+
+  function openLogin() {
+    openUrlInChrome("https://credit.linux.do/balance", $("btn-open"));
   }
 
   async function checkLogin() {
@@ -608,6 +625,12 @@
 
   $("btn-launch").addEventListener("click", launchChrome);
   $("btn-open").addEventListener("click", openLogin);
+  $("btn-open-linuxdo").addEventListener("click", () => {
+    openUrlInChrome("https://linux.do/", $("btn-open-linuxdo"));
+  });
+  $("btn-open-connect").addEventListener("click", () => {
+    openUrlInChrome("https://connect.linux.do/", $("btn-open-connect"));
+  });
   $("btn-read").addEventListener("click", readCookies);
   $("btn-check").addEventListener("click", checkLogin);
   $("btn-copy").addEventListener("click", copyJson);
@@ -624,7 +647,7 @@
   if (location.protocol === "file:") {
     showBanner();
     $("cdp-state").textContent = "请先运行 cookie_tool.py";
-    ["btn-launch", "btn-open", "btn-read", "btn-check"].forEach((id) => {
+    ["btn-launch", "btn-open", "btn-open-linuxdo", "btn-open-connect", "btn-read", "btn-check"].forEach((id) => {
       $(id).disabled = true;
     });
   } else {

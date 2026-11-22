@@ -36,6 +36,8 @@ python3 cookie_tool.py
 |---|---|
 | 启动 Chrome | 用独立 profile 启动带 `--remote-debugging-port` 的 Chrome |
 | 打开登录页 | 在 Chrome 里打开 <https://credit.linux.do/balance> |
+| 打开 linux.do | 在 Chrome 里打开 <https://linux.do/>，补全 `_forum_session` / `_t` |
+| 打开 connect | 在 Chrome 里打开 <https://connect.linux.do/>，补全 `auth.session-token` |
 | 读取 Cookie | 读取并生成 Cookie-Editor 兼容 JSON |
 | 验证登录 | 打开 `/balance` 并调用 `user-info`，显示昵称和余额 |
 
@@ -43,9 +45,14 @@ python3 cookie_tool.py
 
 1. 点「启动 Chrome」；
 2. 在弹出的 Chrome 里登录 credit，完成 Cloudflare / 人机验证，直到能看到余额；
+   如果只读到 `linux_do_credit_session_id`，再点「打开 linux.do」登录，然后点
+   「打开 connect」；
 3. 回到工具页点「读取 Cookie」→「复制 JSON」；
 4. 在青龙「环境变量」新增 `CREDIT_COOKIE_JSON`，粘贴 JSON；
 5. 青龙任务继续只跑 `credit_browser.py`。
+
+> 页面上的 JSON 就是可粘贴到青龙的 `CREDIT_COOKIE_JSON`，包含当前 Chrome 里
+> 所有相关 cookie。工具不会伪造缺失的 cookie；缺哪一项就先去对应站点登录。
 
 常用参数：
 
@@ -123,6 +130,17 @@ Chrome 进程还在，但所有窗口/标签页都被关掉了。Playwright 无�
 
 说明 Chrome 还没真正登录 credit。先在 Chrome 里打开
 <https://credit.linux.do/balance>，完成验证并看到余额后再读取。
+
+**Q：只读到一个 `linux_do_credit_session_id`，另外 3 个没有？**
+
+说明这个 Chrome 只有 credit 会话，没有 linux.do 论坛登录态。按顺序操作：
+
+1. 点「打开 linux.do」，在同一个 Chrome 里登录；
+2. 点「打开 connect」，让 connect.linux.do 写入 `auth.session-token`；
+3. 回工具页重新点「读取 Cookie」。
+
+`_forum_session` / `_t` 是会话 cookie，Chrome 完全退出后会消失，登录后要马上导出。
+只导出一个 `linux_do_credit_session_id` 也能查余额，但 credit 会话过期后无法自动续期。
 
 **Q：为什么默认不导出 `cf_clearance`？**
 

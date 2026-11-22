@@ -224,9 +224,16 @@ def cookie_warnings(seen: set[str]) -> list[str]:
     warnings = []
     if "auth.session-token" not in seen:
         warnings.append(
-            "没有 auth.session-token：可以查余额，但 credit 会话过期后无法自动续期。"
+            "没有 auth.session-token：当前 JSON 仍可查询余额，但 credit 会话过期后"
+            "无法自动续期。请在 Chrome 打开 https://connect.linux.do 后再读取。"
         )
-    missing_extra = EXTRA - seen
+    if "_forum_session" not in seen:
+        warnings.append(
+            "没有 _forum_session：这个 Chrome 还没有 linux.do 登录态。"
+            "请在 Chrome 打开 https://linux.do 登录，再打开 "
+            "https://connect.linux.do，然后重新读取。"
+        )
+    missing_extra = EXTRA - seen - {"_forum_session"}
     if missing_extra:
         warnings.append(
             "没找到（通常不影响）：" + "、".join(sorted(missing_extra))
