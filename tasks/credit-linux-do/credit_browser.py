@@ -233,17 +233,48 @@ def find_chromium() -> str:
 
 
 def display_usable(display: str) -> bool:
-    """Linux 下检查本地 DISPLAY 的 X socket 是否还在；macOS 直接信任。"""
+    """Linux 下检查本地 DISPLAY 是否真的可用；macOS 直接信任。"""
     if not sys.platform.startswith("linux"):
         return True
     if not display.startswith(":"):
         return True
     number = display[1:].split(".")[0]
-    return Path(f"/tmp/.X11-unix/X{number}").exists()
+    socket_file = Path(f"/tmp/.X11-unix/X{number}")
+    if not socket_file.exists():
+        return False
+
+    # 优先实际探测 X server；socket 文件可能只是上次崩溃留下的。
+    for tool, args in (
+        ("xdpyinfo", ["-display", display]),
+        ("xset", ["-display", display, "q"]),
+    ):
+        exe = shutil.which(tool)
+        if exe:
+            try:
+                result = subprocess.run(
+                    [exe] + args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                )
+                return result.returncode == 0
+            except Exception:
+                return False
+
+    # 没有探测工具时，至少确认 xvfb.pid 里的进程还活着；
+    # 没有 pid 文件就无法确认，保守起见另起一个 Xvfb。
+    try:
+        pid = int((runtime_dir() / "xvfb.pid").read_text().strip())
+        return "Xvfb" in pid_cmdline(pid)
+    except (OSError, ValueError):
+        return False
 
 
 def ensure_display() -> Optional[subprocess.Popen]:
     """没有 DISPLAY 时启动 Xvfb，返回 Xvfb 进程（已有 DISPLAY 则返回 None）。"""
+    if not sys.platform.startswith("linux"):
+        # macOS 直接使用桌面会话，不需要 Xvfb。
+        return None
     current = os.getenv("DISPLAY")
     if current:
         if display_usable(current):
@@ -267,9 +298,12 @@ def ensure_display() -> Optional[subprocess.Popen]:
         lock_file = Path(f"/tmp/.X{number}-lock")
         socket_file = Path(f"/tmp/.X11-unix/X{number}")
         if socket_file.exists():
-            os.environ["DISPLAY"] = display
-            log(f"[*] 复用已有 Xvfb（DISPLAY={display}）")
-            return None
+            if display_usable(display):
+                os.environ["DISPLAY"] = display
+                log(f"[*] 复用已有 Xvfb（DISPLAY={display}）")
+                return None
+            log(f"[!] {display} 的 X socket 已失效，跳过")
+            continue
         if lock_file.exists():
             continue
         proc = subprocess.Popen(
@@ -299,6 +333,30 @@ def cdp_version(port: int) -> Optional[dict]:
             return json.loads(resp.read().decode("utf-8", "replace"))
     except Exception:
         return None
+
+
+def cdp_targets(port: int) -> list[dict]:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(f"http://127.0.0.1:{port}/json/list", timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def wait_for_page_targets(port: int, timeout: float = 5.0) -> list[dict]:
+    """等待 Chromium 真正创建页面目标；没有页面通常意味着显示初始化失败。"""
+    deadline = time.time() + timeout
+    while True:
+        pages = [
+            target
+            for target in cdp_targets(port)
+            if target.get("type") == "page"
+        ]
+        if pages or time.time() >= deadline:
+            return pages
+        time.sleep(0.3)
 
 
 def port_free(port: int) -> bool:
@@ -338,6 +396,8 @@ def start_chromium(profile_dir: Path) -> str:
             log(f"[*] 复用上次启动的 Chromium（CDP {saved_port}）")
             return saved
         log("[!] 上次的 Chromium 状态无效，重新启动 …")
+        # 先停掉可能还占着 profile 的旧进程，否则新 Chromium 会复用旧实例。
+        close_browser(profile_dir, stop_xvfb=False)
         for path in (state_path, pid_path):
             try:
                 path.unlink()
@@ -356,6 +416,16 @@ def start_chromium(profile_dir: Path) -> str:
         )
 
     chromium = find_chromium()
+    try:
+        version = subprocess.check_output(
+            [chromium, "--version"],
+            text=True,
+            stderr=subprocess.STDOUT,
+            timeout=5,
+        ).strip()
+    except Exception:
+        version = "unknown"
+    log(f"[*] Chromium 版本：{version}")
     ensure_display()
 
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -372,6 +442,9 @@ def start_chromium(profile_dir: Path) -> str:
         "--no-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
+        "--disable-crash-reporter",
+        "--disable-breakpad",
+        "--noerrdialogs",
         f"--window-size={WINDOW_SIZE}",
     ]
     proxy = os.getenv("CREDIT_BROWSER_PROXY")
@@ -395,6 +468,17 @@ def start_chromium(profile_dir: Path) -> str:
             (runtime_dir() / "chromium.pid").write_text(str(proc.pid))
             state_path.write_text(f"http://127.0.0.1:{port}")
             log(f"[+] Chromium 已就绪（CDP {port}）")
+            pages = wait_for_page_targets(port)
+            if pages:
+                debug(
+                    "CDP 页面："
+                    + "，".join(
+                        (target.get("url") or "(blank)")[:80]
+                        for target in pages
+                    )
+                )
+            else:
+                log("[!] Chromium 没有页面目标，可能没有连上 Xvfb。")
             return f"http://127.0.0.1:{port}"
         if proc.poll() is not None:
             break
@@ -484,6 +568,12 @@ def load_playwright():
             "未安装 Playwright。请在青龙「依赖管理 → Python3」中添加 playwright，"
             "或执行：pip3 install playwright"
         ) from exc
+    try:
+        from importlib.metadata import version as _version
+
+        log(f"[*] Playwright 版本：{_version('playwright')}")
+    except Exception:
+        pass
     return sync_playwright
 
 
@@ -1310,8 +1400,9 @@ def run(args) -> int:
             session = stack.enter_context(BrowserSession(cdp_url))
         except Exception as exc:  # noqa: BLE001
             log(f"[!] 连接 Chromium 失败：{exc}")
-            log("[*] 清理旧浏览器并重新启动 …")
-            close_browser(profile_dir, stop_xvfb=False)
+            log("[*] 清理旧浏览器和 Xvfb，重新启动 …")
+            close_browser(profile_dir, stop_xvfb=True)
+            os.environ.pop("DISPLAY", None)
             cdp_url = start_chromium(profile_dir)
             session = stack.enter_context(BrowserSession(cdp_url))
 

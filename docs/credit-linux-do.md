@@ -46,7 +46,7 @@
 
 ```bash
 apt-get update
-apt-get install -y xvfb fonts-noto-cjk
+apt-get install -y xvfb x11-utils fonts-noto-cjk
 pip3 install playwright
 ```
 
@@ -55,6 +55,7 @@ pip3 install playwright
 | 类型 | 名称 |
 |---|---|
 | Linux | `xvfb` |
+| Linux | `x11-utils`（可选，用于检测 Xvfb 是否真的可用） |
 | Linux | `fonts-noto-cjk` |
 | Python3 | `playwright` |
 
@@ -262,10 +263,10 @@ python3 credit_browser.py --import-cookies /ql/data/credit-linux-do/credit_cooki
 在青龙容器里执行：
 
 ```bash
-apt-get update && apt-get install -y xvfb fonts-noto-cjk
+apt-get update && apt-get install -y xvfb x11-utils fonts-noto-cjk
 ```
 
-或在青龙「依赖管理 → Linux」中添加 `xvfb`。
+或在青龙「依赖管理 → Linux」中添加 `xvfb` 和 `x11-utils`。
 
 **Q：日志提示「未安装 Playwright」？**
 
@@ -322,7 +323,14 @@ CDP 地址，或先停掉占用端口的程序。
 
 **Q：日志提示 `BrowserType.connect_over_cdp: Timeout 30000ms exceeded`？**
 
-说明复用到了一个无响应的旧 Chromium。脚本会自动清理并重新启动；也可以手动处理：
+说明 Chromium 的 CDP 端口能连上，但浏览器主线程没有响应。常见原因是复用了
+一个已经卡死的旧 Chromium，或者它连接的 Xvfb 已经失效。脚本会：
+
+1. 检查旧 Chromium 的 PID 和 profile 是否匹配；
+2. 清理旧浏览器和 Xvfb，重新启动一个全新的 Xvfb 和 Chromium；
+3. 再连接一次。
+
+如果仍然超时，请更新脚本后手动清理并重试：
 
 ```bash
 cd /ql/data/repo/rabbit-juice-ai_QinglongScripts/tasks/credit-linux-do
@@ -330,12 +338,22 @@ python3 credit_browser.py --close
 python3 credit_browser.py
 ```
 
-如果还不行，检查 9222 是否被别的程序占用：
+并检查：
 
 ```bash
-ss -lntp | grep 9222
-ps -ef | grep -i '[c]hrom'
+chromium --version
+python3 -c "import importlib.metadata as m; print('playwright', m.version('playwright'))"
+tail -n 120 /ql/data/credit-linux-do/logs/chromium.log
+ps -ef | grep -E '[c]hrom|[X]vfb'
+curl -s http://127.0.0.1:9222/json/list
 ```
+
+如果 `chromium --version` 和 Playwright 版本差距很大（例如 Chromium 很旧），
+可以升级 Chromium，或安装与 Chromium 匹配的 Playwright 版本。正常情况下
+Playwright 只通过 CDP 控制系统 Chromium，不需要 `playwright install`。
+
+如果日志里有 `Chromium 没有页面目标`，基本可以确定 Chromium 没有连上 Xvfb；
+安装 `x11-utils` 后重跑，让脚本用 `xdpyinfo` 实际探测显示器。
 
 **Q：怎么没收到飞书通知？**
 
