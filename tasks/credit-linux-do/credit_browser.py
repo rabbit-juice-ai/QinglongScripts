@@ -96,6 +96,7 @@ XVFB_SCREEN = "1280x900x24"
 CDP_START_TIMEOUT = 30
 CF_TIMEOUT = int(os.getenv("CREDIT_CF_TIMEOUT", "60"))
 LOGIN_TIMEOUT = int(os.getenv("CREDIT_LOGIN_TIMEOUT", "60"))
+HCAPTCHA_TIMEOUT = int(os.getenv("CREDIT_HCAPTCHA_TIMEOUT", "20"))
 
 CF_TITLES = (
     "请稍候…",
@@ -1226,6 +1227,49 @@ def wait_turnstile(page, timeout: int = CF_TIMEOUT) -> bool:
     return False
 
 
+def has_hcaptcha(page) -> bool:
+    """linux.do 的 Discourse 可能额外要求 hCaptcha，和 Cloudflare 是两回事。"""
+    selectors = (
+        "iframe[src*='hcaptcha.com']",
+        "textarea[name='h-captcha-response']",
+        "input[name='h-captcha-response']",
+    )
+    try:
+        if any(page.query_selector(selector) for selector in selectors):
+            return True
+    except Exception:
+        return False
+    try:
+        text = page.inner_text("body")[:4000]
+    except Exception:
+        return False
+    return "Human Verification" in text or "人机验证" in text
+
+
+def wait_hcaptcha(page, timeout: int = HCAPTCHA_TIMEOUT) -> bool:
+    """等待 hCaptcha token 自动填充；不点击、不破解验证码。"""
+    if not has_hcaptcha(page):
+        return True
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            element = page.query_selector(
+                "textarea[name='h-captcha-response'], "
+                "input[name='h-captcha-response']"
+            )
+        except Exception:
+            element = None
+        if element:
+            try:
+                value = element.evaluate("e => e.value || ''")
+            except Exception:
+                value = ""
+            if len(value) > 20:
+                return True
+        page.wait_for_timeout(1000)
+    return False
+
+
 def has_login_error(page) -> bool:
     try:
         text = page.inner_text("body")[:4000]
@@ -1320,10 +1364,15 @@ def login_diagnostics(
             """() => {
               const btn = document.querySelector('#login-button, #signin-button');
               const input = document.querySelector('input[name="cf-turnstile-response"]');
+              const hc = document.querySelector(
+                "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
+              );
               return {
                 hasButton: !!btn,
                 buttonDisabled: btn ? !!btn.disabled : null,
                 tokenLen: input ? (input.value || '').length : -1,
+                hasHcaptcha: !!document.querySelector("iframe[src*='hcaptcha.com']") || !!hc,
+                hcaptchaLen: hc ? (hc.value || '').length : -1,
                 hasPassword: !!document.querySelector(
                   '#login-account-password, #signin_password'
                 ),
@@ -1334,7 +1383,9 @@ def login_diagnostics(
             f"[!] 表单状态：按钮={'有' if state.get('hasButton') else '无'}"
             f"（{'禁用' if state.get('buttonDisabled') else '可点'}），"
             f"密码框={'有' if state.get('hasPassword') else '无'}，"
-            f"Turnstile token 长度={state.get('tokenLen')}"
+            f"Turnstile token 长度={state.get('tokenLen')}，"
+            f"hCaptcha={'有' if state.get('hasHcaptcha') else '无'}"
+            f"（token 长度={state.get('hcaptchaLen')}）"
         )
     except Exception:
         pass
@@ -1388,6 +1439,18 @@ def do_linuxdo_login(page, username: str, password: str) -> None:
             "请在浏览器里点一下验证，或从 Mac 导出 cookie 后用 --import-cookies 导入。"
         )
     log("[+] Cloudflare Turnstile 已通过")
+
+    if has_hcaptcha(page):
+        log("[*] 检测到 linux.do 的 hCaptcha 人机验证，等待自动通过 …")
+        if not wait_hcaptcha(page):
+            save_debug_screenshot(page, "linuxdo-hcaptcha")
+            raise NeedManual(
+                "linux.do 登录页要求 hCaptcha 人机验证（Human Verification），"
+                "需要人工完成。脚本不会点击或破解验证码。\n"
+                "处理：优先直连/换住宅 IP；或用 noVNC 手动点一次；"
+                "或从已登录的 Mac 导出 cookie 后用 --import-cookies 导入。"
+            )
+        log("[+] hCaptcha 已通过")
 
     responses: list[dict] = []
     failures: list[str] = []

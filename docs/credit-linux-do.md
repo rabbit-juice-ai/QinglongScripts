@@ -89,6 +89,7 @@ apt-get install -y chromium
 | `CREDIT_CDP_URL` | 否 | 连接已有的 Chromium，例如 `http://127.0.0.1:9222`；一般不用 |
 | `CREDIT_BROWSER_PROXY` | 否 | Chromium 代理，例如 `http://192.168.1.2:7897`；不填时自动读取 `PROXY_URL` / `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`。设为 `none` 强制直连 |
 | `CREDIT_CF_TIMEOUT` | 否 | 等待 Cloudflare/Turnstile 的秒数，默认 `60` |
+| `CREDIT_HCAPTCHA_TIMEOUT` | 否 | 等待 linux.do hCaptcha 自动通过的秒数，默认 `20`；超时会提示需要人工完成 |
 | `CREDIT_LOGIN_TIMEOUT` | 否 | 等待登录跳转的秒数，默认 `60` |
 | `CREDIT_WEBHOOK_URL` | 否 | 飞书自定义机器人 Webhook；未配置时回退青龙 `notify.py` |
 | `CREDIT_WEBHOOK_SECRET` | 否 | 飞书机器人「签名校验」密钥；只有开启签名校验才需要 |
@@ -381,6 +382,18 @@ curl -x http://192.168.1.2:7897 -s https://api.ipify.org; echo
 - 页面文字含「验证邮箱」「verification code」：去邮箱完成验证；
 - 没有 POST 响应，或 `按钮=禁用`：页面还没准备好，检查 Turnstile token 长度
   是否大于 20；可以调大 `CREDIT_LOGIN_TIMEOUT`。
+
+**Q：日志提示「linux.do 登录页要求 hCaptcha 人机验证」？**
+
+linux.do 的 Discourse 在 Cloudflare Turnstile 之外，还可能要求 hCaptcha
+（页面上的 `Human Verification` / `Verify`）。脚本只等待它自动通过，不点击、
+不破解验证码。等待 `CREDIT_HCAPTCHA_TIMEOUT`（默认 20 秒）仍没有 token，就会
+以退出码 2 提示。处理方式：
+
+- 优先直连或换住宅 IP，机房 IP 更容易触发 hCaptcha；
+- 用 noVNC 在浏览器里手动点一次；
+- 从已登录的 Mac 导出 cookie 后用 `--import-cookies` 导入（推荐）。导入后
+  不需要再走 linux.do 登录，也就不会遇到 hCaptcha。
 
 **Q：会不会每天重新登录？**
 
