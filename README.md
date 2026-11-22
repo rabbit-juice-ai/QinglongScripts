@@ -38,8 +38,10 @@
 | 脚本 | 功能 | 定时规则 | 文档 |
 |:---:|:---|:---:|:---:|
 | 🎯 `agentrouter_checkin.py` | AgentRouter 多账号签到与余额汇总 | 手动配置（建议每天一次） | [使用文档](docs/agentrouter-checkin.md) |
+| 💳 `credit_browser.py` | LINUX DO Credit 浏览器自动登录 + 飞书余额通知（推荐，Chromium + Xvfb） | 手动配置（建议每天一次） | [使用文档](docs/credit-linux-do.md) |
+| 🍪 `credit_login.py` | LINUX DO Credit Cookie 模式（备用，纯 HTTP） | 手动配置（建议每天一次） | [使用文档](docs/credit-linux-do.md) |
 
-> 💡 脚本路径：`tasks/agentrouter-checkin/agentrouter_checkin.py`；环境变量、任务命令、运行模式等均见对应文档。
+> 💡 脚本路径：`tasks/<任务名>/<脚本>.py`；环境变量、任务命令、运行模式等均见对应文档。
 
 ---
 
@@ -49,10 +51,14 @@
 QinglongScripts/
 ├── README.md                       # 项目说明
 ├── docs/
-│   └── agentrouter-checkin.md      # AgentRouter 脚本使用文档
+│   ├── agentrouter-checkin.md      # AgentRouter 脚本使用文档
+│   └── credit-linux-do.md          # LINUX DO Credit 脚本使用文档
 └── tasks/
-    └── agentrouter-checkin/
-        └── agentrouter_checkin.py  # 唯一运行文件（纯标准库）
+    ├── agentrouter-checkin/
+    │   └── agentrouter_checkin.py  # 唯一运行文件（纯标准库）
+    └── credit-linux-do/
+        ├── credit_browser.py       # 浏览器自动登录（推荐，Chromium + Xvfb + Playwright）
+        └── credit_login.py         # Cookie 纯 HTTP 模式（备用，纯标准库）
 ```
 
 ---
@@ -61,7 +67,8 @@ QinglongScripts/
 
 - 本仓库不包含任何真实账号、密码、Cookie、Webhook；
 - 凭据只应配置在青龙环境变量或本地未提交的 env 文件中；
-- 会话文件（`*.cookies`、会话附属 `.json`）视同凭据，已被 `.gitignore` 排除；
+- 飞书 Webhook URL、签名密钥也属于凭据，不要提交 Git；
+- 会话文件（`*.cookies`、会话附属 `.json`）和浏览器 profile 视同凭据，已被 `.gitignore` 排除；
 - 运行日志不会输出密码、Cookie、Token。
 
 > ⚠️ 请在使用前确认目标平台的服务条款允许此类自动化操作；本项目不提供绕过验证码、MFA 或风控的能力。

@@ -14,3 +14,13 @@ data/
 sessions/
 *.cookies
 *.session
+credit_cookies.json
+
+# Browser runtime / profile (credentials)
+.runtime/
+browser-profile/
+credit-browser-profile/
+*.pid
+cdp_url
+chromium.log
+xvfb.log
