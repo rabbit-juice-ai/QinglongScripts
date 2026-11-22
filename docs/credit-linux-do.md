@@ -494,6 +494,31 @@ getent hosts credit.linux.do
 脚本不会绕过 Cloudflare；它只是用真实有头 Chromium 等挑战自然通过。如果
 挑战要求人工点击，会以退出码 3 停止。
 
+**Q：日志提示 `user-info 被 Cloudflare 拦截` / `Cloudflare 拦截了 user-info 请求`？**
+
+说明页面本身可能已经打开，但接口请求被 Cloudflare 单独挑战。脚本会：
+
+1. 输出 `cf_clearance` 的状态（剩余时间/已过期/没有）和 403 响应片段；
+2. 清掉可能失效的 `cf_clearance`，重新加载 `/balance` 让浏览器重新完成挑战；
+3. 再请求一次；仍失败则以退出码 3 停止。
+
+先看出口 IP 归属。机房/VPS IP 很容易被重点挑战，例如美国 Cogent 的
+`23.141.x.x`。优先直连，用 NAS 的家庭宽带 IP：
+
+```text
+CREDIT_BROWSER_PROXY=none
+```
+
+必须用代理时，选**固定出口 IP 的住宅节点**，不要用会轮换的机房节点。判断方法：
+
+```bash
+curl -x http://192.168.1.2:7897 -s https://ipinfo.io/json
+```
+
+看 `org` 字段：`Cogent`、`DigitalOcean`、`Vultr`、`AWS` 等机房 IP 都容易被
+Cloudflare 重点挑战；`China Telecom` / `China Unicom` / `China Mobile` 等
+住宅宽带 IP 通常更容易通过。
+
 **Q：怎么没收到飞书通知？**
 
 按日志检查：

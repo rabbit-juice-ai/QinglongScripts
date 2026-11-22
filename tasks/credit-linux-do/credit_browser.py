@@ -1026,7 +1026,59 @@ def is_navigation_error(exc: Exception) -> bool:
     )
 
 
-def api_user(page) -> Optional[dict]:
+def _cf_cookie_state(ctx) -> str:
+    """描述 cf_clearance 的状态；不输出 cookie 值。"""
+    try:
+        cookies = ctx.cookies("https://credit.linux.do")
+    except Exception:
+        return "无法读取 cookie"
+    for cookie in cookies:
+        if cookie.get("name") != "cf_clearance":
+            continue
+        expires = cookie.get("expires") or -1
+        if expires and expires > 0:
+            remaining = int(expires - time.time())
+            if remaining <= 0:
+                return "cf_clearance 已过期"
+            return f"cf_clearance 剩余约 {max(1, round(remaining / 3600))} 小时"
+        return "cf_clearance 是会话 cookie"
+    return "没有 cf_clearance"
+
+
+def clear_cf_clearance(ctx) -> None:
+    """只清除 Cloudflare 通行证，不动登录会话。"""
+    try:
+        ctx.clear_cookies(name="cf_clearance")
+        return
+    except TypeError:
+        pass
+    except Exception:
+        return
+    try:
+        cookies = ctx.cookies("https://credit.linux.do")
+    except Exception:
+        return
+    expired = []
+    for cookie in cookies:
+        if cookie.get("name") != "cf_clearance":
+            continue
+        expired.append(
+            {
+                "name": "cf_clearance",
+                "value": "",
+                "domain": cookie.get("domain") or "credit.linux.do",
+                "path": cookie.get("path") or "/",
+                "expires": 1,
+            }
+        )
+    if expired:
+        try:
+            ctx.add_cookies(expired)
+        except Exception:
+            pass
+
+
+def api_user(page, retry_cf: bool = True) -> Optional[dict]:
     """在页面上下文里调用 user-info；返回用户数据，401 返回 None。"""
     last_exc = None
     for attempt in range(3):
@@ -1074,12 +1126,36 @@ def api_user(page) -> Optional[dict]:
             return payload.get("data")
         if status == 401:
             return None
-        if status == 403 and ("Just a moment" in text or "challenge" in text):
+        if status == 403:
+            lowered = text.lower()
+            looks_cf = any(
+                marker in lowered
+                for marker in ("just a moment", "challenge", "cloudflare", "<html")
+            )
+            if not looks_cf:
+                raise CreditError(f"user-info 返回 HTTP 403：{text[:200]}")
             if attempt < 2:
                 debug("user-info 遇到 Cloudflare 403，等待后重试")
                 page.wait_for_timeout(2000)
                 continue
-            raise CloudflareBlocked("Cloudflare 拦截了 user-info 请求。")
+
+            ctx = page.context
+            snippet = " ".join(text.split())[:120]
+            log(f"[!] user-info 被 Cloudflare 拦截（{_cf_cookie_state(ctx)}）")
+            log(f"[!] 403 响应片段：{snippet}")
+            if retry_cf:
+                log("[*] 清除可能失效的 cf_clearance，重新加载页面等待 Cloudflare …")
+                clear_cf_clearance(ctx)
+                try:
+                    goto(page, BALANCE_URL)
+                except CloudflareBlocked:
+                    pass
+                else:
+                    return api_user(page, retry_cf=False)
+            raise CloudflareBlocked(
+                "Cloudflare 拦截了 user-info 请求。当前出口 IP 可能被重点挑战；"
+                "请换固定住宅 IP，或设置 CREDIT_BROWSER_PROXY=none 直连。"
+            )
         raise CreditError(f"user-info 返回 HTTP {status}：{text[:200]}")
 
     raise CreditError(f"页面持续导航，无法读取会话：{last_exc}")
