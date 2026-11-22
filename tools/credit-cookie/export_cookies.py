@@ -40,6 +40,7 @@ from cookie_core import (
     EXTRA,
     ToolError,
     cdp_alive,
+    check_linuxdo_login,
     describe_expiry,
     payload_json,
     read_cookies,
@@ -85,6 +86,11 @@ def main() -> int:
         default=None,
         help="Chrome 可执行文件路径；默认自动查找",
     )
+    parser.add_argument(
+        "--no-check-linuxdo",
+        action="store_true",
+        help="不检查 linux.do 登录态（更快，但可能导出匿名 auth.session-token）",
+    )
     args = parser.parse_args()
 
     try:
@@ -111,14 +117,32 @@ def main() -> int:
                 return 1
 
         cookies, seen = read_cookies(args.cdp, args.include_cf_clearance)
+        linuxdo = (
+            None if args.no_check_linuxdo else check_linuxdo_login(args.cdp)
+        )
     except ToolError as exc:
         print(f"[x] {exc}", file=sys.stderr)
         return 1
+
+    linuxdo_warning = None
+    if linuxdo and linuxdo.get("ok") is False:
+        linuxdo_warning = (
+            "[!] linux.do 未登录：auth.session-token 可能只是匿名会话，"
+            "导入后无法自动续期。\n"
+            "    请先在 Chrome 打开 https://linux.do 登录，再重新导出。"
+        )
+    elif linuxdo and linuxdo.get("ok") is None:
+        linuxdo_warning = (
+            "[!] 无法确认 linux.do 登录态："
+            + str(linuxdo.get("reason") or "")
+        )
 
     payload = payload_json(cookies)
 
     if args.stdout:
         print(payload)
+        if linuxdo_warning:
+            print(linuxdo_warning, file=sys.stderr)
         print(
             "[!] 以上内容包含登录凭据，粘贴到青龙 CREDIT_COOKIE_JSON 后"
             "请清空终端记录。",
@@ -143,6 +167,8 @@ def main() -> int:
             "[!] 没有 auth.session-token：可以查余额，但 credit 会话过期后"
             "无法自动续期。"
         )
+    if linuxdo_warning:
+        print(linuxdo_warning)
     missing_extra = EXTRA - seen
     if missing_extra:
         print("[!] 没找到（通常不影响）：" + "、".join(sorted(missing_extra)))

@@ -53,6 +53,21 @@ _USER_INFO_JS = """async () => {
   return {status: r.status, text: await r.text()};
 }"""
 
+_LINUXDO_SESSION_JS = """async () => {
+  const r = await fetch('/session/current.json', {
+    headers: {'Accept': 'application/json'},
+    credentials: 'include'
+  });
+  let data = null;
+  try { data = await r.json(); } catch (e) {}
+  const user = data && data.current_user;
+  return {
+    status: r.status,
+    hasUser: !!(user && (user.id || user.username)),
+    username: user ? user.username : null
+  };
+}"""
+
 
 class ToolError(RuntimeError):
     """工具可以直接展示给用户的错误。"""
@@ -477,3 +492,75 @@ def check_login(cdp_url: str = DEFAULT_CDP, timeout: float = 60) -> dict:
             "url": page.url,
             "created_tab": created_tab,
         }
+
+
+def check_linuxdo_login(
+    cdp_url: str = DEFAULT_CDP, timeout: float = 25
+) -> dict:
+    """检查当前 Chrome 是否已登录 linux.do，以及 connect 会话是否可用。
+
+    只返回登录状态和用户名，不返回 cookie 值。检查失败时返回 ok=None，
+    不阻断 cookie 导出。
+    """
+    sync_playwright = _playwright()
+    try:
+        with sync_playwright() as pw:
+            ctx = _connect(pw, cdp_url)
+            page = ctx.new_page()
+            try:
+                page.goto(
+                    "https://linux.do/",
+                    wait_until="domcontentloaded",
+                    timeout=int(timeout * 1000),
+                )
+                result = page.evaluate(_LINUXDO_SESSION_JS)
+                if not isinstance(result, dict):
+                    return {
+                        "ok": None,
+                        "reason": "linux.do 登录态检查返回了异常结果",
+                    }
+                status = int(result.get("status") or 0)
+                if status != 200 or not result.get("hasUser"):
+                    return {
+                        "ok": False,
+                        "reason": f"linux.do 未登录（HTTP {status}）",
+                    }
+
+                # linux.do 已登录，再确认 connect.linux.do 没有退回登录页。
+                page.goto(
+                    "https://connect.linux.do/",
+                    wait_until="domcontentloaded",
+                    timeout=int(timeout * 1000),
+                )
+                title = (page.title() or "").strip()
+                if any(
+                    marker in title
+                    for marker in (
+                        "Just a moment",
+                        "请稍候",
+                        "Attention Required",
+                    )
+                ):
+                    return {
+                        "ok": None,
+                        "reason": "connect.linux.do 被 Cloudflare 拦截，无法确认",
+                    }
+                if "linux.do/login" in page.url:
+                    return {
+                        "ok": False,
+                        "reason": (
+                            "linux.do 已登录，但 connect.linux.do 会话无效；"
+                            "请点「打开 connect」刷新后再读取"
+                        ),
+                    }
+                return {
+                    "ok": True,
+                    "username": result.get("username"),
+                }
+            finally:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": None, "reason": f"无法检查 linux.do 登录态：{exc}"}

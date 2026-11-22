@@ -1994,8 +1994,22 @@ def _build_cookies(payloads: list[tuple[str, str]]) -> tuple[list[dict], set[str
     return cookies, seen
 
 
-def _apply_cookies(ctx, payloads: list[tuple[str, str]]) -> bool:
+def _apply_cookies(ctx, payloads: list[tuple[str, str]], only_missing: bool = False) -> bool:
     cookies, seen = _build_cookies(payloads)
+    if only_missing:
+        try:
+            now = time.time()
+            existing = {
+                cookie["name"]
+                for cookie in ctx.cookies()
+                if not (
+                    (cookie.get("expires") or -1) > 0
+                    and (cookie.get("expires") or -1) <= now
+                )
+            }
+        except Exception:
+            existing = set()
+        cookies = [cookie for cookie in cookies if cookie["name"] not in existing]
     if not cookies:
         return False
     ctx.add_cookies(cookies)
@@ -2016,14 +2030,14 @@ def import_cookies(ctx, paths: list[str]) -> None:
         raise NeedManual("导入的文件里没有找到可用的 linux.do cookie。")
 
 
-def import_cookies_from_env(ctx) -> bool:
+def import_cookies_from_env(ctx, only_missing: bool = False) -> bool:
     """从 CREDIT_COOKIE_JSON / CREDIT_COOKIE 导入；适合青龙环境变量。"""
     for name in ("CREDIT_COOKIE_JSON", "CREDIT_COOKIE"):
         value = os.getenv(name, "").strip()
         if not value:
             continue
         log(f"[*] 从环境变量 {name} 导入 cookie …")
-        if _apply_cookies(ctx, [(name, value)]):
+        if _apply_cookies(ctx, [(name, value)], only_missing=only_missing):
             return True
         log(f"[!] {name} 里没有解析到可用的 linux.do cookie")
         return False
@@ -2039,6 +2053,40 @@ def credit_session_in_profile(ctx) -> bool:
     now = time.time()
     for cookie in cookies:
         if cookie.get("name") != "linux_do_credit_session_id":
+            continue
+        expires = cookie.get("expires") or -1
+        if expires and expires > 0 and expires <= now:
+            return False
+        return True
+    return False
+
+
+def auth_session_in_profile(ctx) -> bool:
+    """profile 里是否有未过期的 connect.linux.do 会话 cookie。"""
+    try:
+        cookies = ctx.cookies("https://connect.linux.do")
+    except Exception:
+        return False
+    now = time.time()
+    for cookie in cookies:
+        if cookie.get("name") != "auth.session-token":
+            continue
+        expires = cookie.get("expires") or -1
+        if expires and expires > 0 and expires <= now:
+            return False
+        return True
+    return False
+
+
+def forum_session_in_profile(ctx) -> bool:
+    """profile 里是否有未过期的 linux.do 论坛会话 cookie。"""
+    try:
+        cookies = ctx.cookies("https://linux.do")
+    except Exception:
+        return False
+    now = time.time()
+    for cookie in cookies:
+        if cookie.get("name") != "_forum_session":
             continue
         expires = cookie.get("expires") or -1
         if expires and expires > 0 and expires <= now:
@@ -2277,8 +2325,14 @@ def run(args) -> int:
         user = None
         env_imported = False
         if not args.login:
-            if not args.import_cookies and not credit_session_in_profile(session.ctx):
-                env_imported = import_cookies_from_env(session.ctx)
+            need_credit = not credit_session_in_profile(session.ctx)
+            need_auth = not auth_session_in_profile(session.ctx)
+            need_forum = not forum_session_in_profile(session.ctx)
+            if not args.import_cookies and (need_credit or need_auth or need_forum):
+                # credit 会话还在时只补缺失的 cookie，不覆盖浏览器刷新出的会话。
+                env_imported = import_cookies_from_env(
+                    session.ctx, only_missing=not need_credit
+                )
             user = check_session(page)
             if user is None and not args.import_cookies and not env_imported:
                 if import_cookies_from_env(session.ctx):

@@ -37,6 +37,7 @@ from cookie_core import (
     ToolError,
     cdp_alive,
     cdp_version,
+    check_linuxdo_login,
     check_login,
     cookie_warnings,
     describe_expiry,
@@ -190,8 +191,19 @@ class Handler(BaseHTTPRequestHandler):
         include_cf = bool(data.get("include_cf_clearance"))
         with BROWSER_LOCK:
             cookies, seen = read_cookies(CONFIG["cdp"], include_cf)
+            linuxdo = check_linuxdo_login(CONFIG["cdp"])
 
         warnings = cookie_warnings(seen)
+        if linuxdo.get("ok") is False:
+            warnings.append(
+                "linux.do 未登录：auth.session-token 可能只是匿名会话，导入后"
+                "无法自动续期。请先在 Chrome 打开 https://linux.do 登录，"
+                "再重新读取。"
+            )
+        elif linuxdo.get("ok") is None:
+            warnings.append(
+                "无法确认 linux.do 登录态：" + str(linuxdo.get("reason") or "")
+            )
         if include_cf:
             warnings.append(
                 "cf_clearance 与出口 IP、User-Agent 绑定，导入青龙后通常无效。"
@@ -212,6 +224,7 @@ class Handler(BaseHTTPRequestHandler):
             ],
             "payload": payload_json(cookies),
             "warnings": warnings,
+            "linuxdo": linuxdo,
         }
 
     def _launch(self) -> dict:

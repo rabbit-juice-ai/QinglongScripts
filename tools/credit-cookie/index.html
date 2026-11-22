@@ -327,6 +327,7 @@
       <span class="badge" id="cookie-count">0 个 cookie</span>
       <span class="badge ok" id="badge-session">credit 会话</span>
       <span class="badge ok" id="badge-auth">auth 续期</span>
+      <span class="badge" id="badge-linuxdo">linux.do 登录态</span>
       <button id="btn-clear" class="danger" style="margin-left:auto">清空</button>
     </div>
     <table>
@@ -489,14 +490,39 @@
       $("json-out").value = state.payload;
 
       const names = new Set((data.cookies || []).map((c) => c.name));
+      const linuxdo = data.linuxdo || {};
       $("badge-session").className =
         "badge " + (names.has("linux_do_credit_session_id") ? "ok" : "bad");
       $("badge-session").textContent = names.has("linux_do_credit_session_id")
         ? "credit 会话" : "缺少 credit 会话";
-      $("badge-auth").className =
-        "badge " + (names.has("auth.session-token") ? "ok" : "warn");
-      $("badge-auth").textContent = names.has("auth.session-token")
-        ? "auth 续期" : "无 auth 续期";
+
+      if (linuxdo.ok === true) {
+        $("badge-linuxdo").className = "badge ok";
+        $("badge-linuxdo").textContent = "linux.do 已登录";
+      } else if (linuxdo.ok === false) {
+        $("badge-linuxdo").className = "badge bad";
+        $("badge-linuxdo").textContent = "linux.do 未登录";
+      } else {
+        $("badge-linuxdo").className = "badge warn";
+        $("badge-linuxdo").textContent = "linux.do 状态未知";
+      }
+
+      let authLabel = "无 auth 续期";
+      let authClass = "warn";
+      if (names.has("auth.session-token")) {
+        if (linuxdo.ok === true) {
+          authLabel = "auth 续期";
+          authClass = "ok";
+        } else if (linuxdo.ok === false) {
+          authLabel = "auth 续期无效";
+          authClass = "bad";
+        } else {
+          authLabel = "auth 续期待确认";
+          authClass = "warn";
+        }
+      }
+      $("badge-auth").className = "badge " + authClass;
+      $("badge-auth").textContent = authLabel;
 
       const rows = $("cookie-rows");
       rows.textContent = "";

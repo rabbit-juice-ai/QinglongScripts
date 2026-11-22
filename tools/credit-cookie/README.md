@@ -142,6 +142,17 @@ Chrome 进程还在，但所有窗口/标签页都被关掉了。Playwright 无�
 `_forum_session` / `_t` 是会话 cookie，Chrome 完全退出后会消失，登录后要马上导出。
 只导出一个 `linux_do_credit_session_id` 也能查余额，但 credit 会话过期后无法自动续期。
 
+**Q：怎么确认 `auth.session-token` 真的能自动续期？**
+
+工具会同时检查 linux.do 和 connect.linux.do 的登录态。只有结果区同时显示：
+
+- `linux.do 已登录`
+- `auth 续期`（绿色）
+
+才说明 `auth.session-token` 是有效会话，可以用于续期。如果显示
+`auth 续期无效`，说明这个 token 只是匿名会话，先按上一题登录 linux.do 和
+connect.linux.do，再重新读取。
+
 **Q：为什么默认不导出 `cf_clearance`？**
 
 `cf_clearance` 和出口 IP、User-Agent 绑定。Mac 上导出的 clearance 到青龙容器

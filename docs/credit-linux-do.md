@@ -643,9 +643,16 @@ python3 export_cookies.py --launch --stdout   # CDP 未运行时自动启动 Chr
 
 导入时机：
 
-- 浏览器 profile 里没有未过期的 `linux_do_credit_session_id` 时导入；
+- 浏览器 profile 里没有未过期的 `linux_do_credit_session_id` 时，导入全部 cookie；
+- profile 有 credit 会话、但缺少 `auth.session-token` 或 `_forum_session` 时，
+  只补缺失的 cookie，不覆盖浏览器刷新出来的 credit 会话；
 - 查询余额返回 401 时，再尝试导入一次；
-- 不会在每次运行时覆盖浏览器刷新出来的新 cookie。
+- 不会覆盖未过期的浏览器 cookie。
+
+> 自动续期依赖有效的 `auth.session-token`。本机工具会同时检查 linux.do 和
+> connect.linux.do 的登录态：页面显示「linux.do 已登录」且「auth 续期」为绿色
+> 时，导出的 JSON 才包含可用于续期的 token；只导出 `linux_do_credit_session_id`
+> 仍然可以查余额，但会话过期后需要重新登录。
 
 ### 2.4 常见问题
 
@@ -692,6 +699,12 @@ Chrome 还没真正登录 credit。先打开 <https://credit.linux.do/balance>�
 `_forum_session` / `_t` 是会话 cookie，Chrome 完全退出后会消失，登录后要马上
 导出。只导出一个 `linux_do_credit_session_id` 也能查余额，但 credit 会话过期后
 无法自动续期。
+
+**Q：怎么确认 `auth.session-token` 真的能自动续期？**
+
+工具会同时检查 linux.do 和 connect.linux.do 的登录态。只有结果区同时显示
+「linux.do 已登录」和绿色的「auth 续期」，才说明 token 是有效会话。如果显示
+「auth 续期无效」，说明它只是匿名会话，按上一题登录后再重新读取。
 
 **Q：为什么默认不导出 `cf_clearance`？**
 
