@@ -1,4 +1,10 @@
 <!doctype html>
+<!--
+  不要直接双击本文件！
+  浏览器不允许普通网页读取 HttpOnly cookie，也不允许网页启动 Chrome。
+  请在当前目录运行：python3 cookie_tool.py
+  工具会自动打开 http://127.0.0.1:8765/。
+-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -38,6 +44,21 @@
   header { margin-bottom: 22px; }
   h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.02em; }
   .sub { color: var(--muted); font-size: 14px; }
+  .banner {
+    display: none;
+    margin-bottom: 16px;
+    padding: 14px 16px;
+    border: 1px solid #f5c26b;
+    border-radius: 12px;
+    background: #fff8e6;
+    color: #7a4b00;
+    font-size: 13.5px;
+    line-height: 1.7;
+  }
+  .banner.show { display: block; }
+  .banner b { color: #7a4b00; }
+  .banner code { background: #fff1cc; color: #7a4b00; }
+  .banner-cmd { margin: 8px 0; }
   .card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -240,6 +261,18 @@
     </div>
   </header>
 
+  <div class="banner" id="banner">
+    <b>请通过本地工具打开本页面。</b>
+    直接双击 <code>index.html</code> 只能看到界面，无法读取 HttpOnly cookie，
+    也无法启动 Chrome。请确保已下载整个 <code>tools/credit-cookie</code> 目录，
+    然后在其中运行：
+    <div class="banner-cmd">
+      <code>cd tools/credit-cookie</code><br>
+      <code>python3 cookie_tool.py</code>
+    </div>
+    工具会自动打开 <code>http://127.0.0.1:8765/</code>，请在那个地址操作。
+  </div>
+
   <section class="card">
     <h2>状态</h2>
     <div class="status-grid">
@@ -305,6 +338,9 @@
   <section class="card">
     <h2>使用步骤</h2>
     <ol class="steps">
+      <li>在 <code>tools/credit-cookie</code> 目录运行 <code>python3 cookie_tool.py</code>，
+        <b>不要直接双击 index.html</b>。工具会自动打开
+        <code>http://127.0.0.1:8765/</code>。</li>
       <li>点 <b>启动 Chrome</b>。工具会用独立 profile 启动一个带调试端口的 Chrome。</li>
       <li>在打开的 Chrome 里登录 <b>credit.linux.do/balance</b>，完成 Cloudflare
         或人机验证，直到能看到余额。</li>
@@ -379,7 +415,14 @@
     return el;
   }
 
+  function showBanner() { $("banner").classList.add("show"); }
+  function hideBanner() { $("banner").classList.remove("show"); }
+
   function renderStatus(data) {
+    hideBanner();
+    ["btn-open", "btn-read", "btn-check"].forEach((id) => {
+      $(id).disabled = state.busy;
+    });
     const dot = $("cdp-state");
     dot.textContent = "";
     dot.appendChild(text("span", "dot " + (data.cdp ? "on" : "off")));
@@ -406,8 +449,11 @@
     try {
       renderStatus(await api("/api/status"));
     } catch (err) {
-      $("cdp-state").textContent = "服务未连接";
-      $("btn-launch").disabled = true;
+      showBanner();
+      $("cdp-state").textContent = "本地工具未连接";
+      ["btn-launch", "btn-open", "btn-read", "btn-check"].forEach((id) => {
+        $(id).disabled = true;
+      });
     }
   }
 
@@ -573,8 +619,16 @@
     toast("已从页面清空");
   });
 
-  refreshStatus();
-  setInterval(refreshStatus, 10000);
+  if (location.protocol === "file:") {
+    showBanner();
+    $("cdp-state").textContent = "请先运行 cookie_tool.py";
+    ["btn-launch", "btn-open", "btn-read", "btn-check"].forEach((id) => {
+      $(id).disabled = true;
+    });
+  } else {
+    refreshStatus();
+    setInterval(refreshStatus, 10000);
+  }
 })();
 </script>
 </body>

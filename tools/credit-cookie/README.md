@@ -6,6 +6,11 @@
 > 这个目录是**本机工具**，不是青龙定时任务。青龙里只需要运行
 > `tasks/credit-linux-do/credit_browser.py`。
 
+> ⚠️ **不要直接双击 `index.html`。** 它是一个需要本地 Python 服务配合的页面：
+> 浏览器安全策略不允许普通网页读取 HttpOnly cookie，也不允许网页启动 Chrome。
+> 请运行 `python3 cookie_tool.py`，它会自动打开 `http://127.0.0.1:8765/`。
+> 想少敲命令：macOS 双击 `start.command`，Windows 双击 `start.bat`。
+
 ## 为什么需要它
 
 青龙容器里的 Chromium 登录 linux.do 时，可能被 hCaptcha 拦住。已经在 Mac/PC
@@ -16,6 +21,8 @@ Chrome 上登录过 credit 的话，可以导出会话 cookie 放到青龙，浏
 Chrome DevTools Protocol 读取，页面只是本地操作界面。
 
 ## 页面工具（推荐）
+
+macOS 直接双击 `start.command`；Windows 双击 `start.bat`。也可以终端运行：
 
 ```bash
 cd tools/credit-cookie

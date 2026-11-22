@@ -585,6 +585,10 @@ Cloudflare 重点挑战；`China Telecom` / `China Unicom` / `China Mobile` 等
 
 ### 2.1 页面工具（推荐）
 
+> **不要直接双击 `index.html`。** 浏览器安全策略不允许普通网页读取 HttpOnly
+> cookie，也不允许网页启动 Chrome。页面必须由 `cookie_tool.py` 提供，通过本地
+> 服务 + CDP 读取。macOS 可双击 `start.command`，Windows 可双击 `start.bat`。
+
 ```bash
 cd /path/to/QinglongScripts/tools/credit-cookie
 python3 cookie_tool.py

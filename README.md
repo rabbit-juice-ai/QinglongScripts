@@ -76,7 +76,9 @@ QinglongScripts/
         ├── cookie_tool.py          # 页面工具：读取 cookie / 生成 JSON
         ├── export_cookies.py       # 命令行导出
         ├── cookie_core.py          # 共享 CDP 逻辑
-        └── index.html              # 工具页面
+        ├── index.html              # 工具页面
+        ├── start.command           # macOS 双击启动
+        └── start.bat               # Windows 双击启动
 ```
 
 ---
