@@ -232,11 +232,25 @@ def find_chromium() -> str:
     )
 
 
+def display_usable(display: str) -> bool:
+    """Linux 下检查本地 DISPLAY 的 X socket 是否还在；macOS 直接信任。"""
+    if not sys.platform.startswith("linux"):
+        return True
+    if not display.startswith(":"):
+        return True
+    number = display[1:].split(".")[0]
+    return Path(f"/tmp/.X11-unix/X{number}").exists()
+
+
 def ensure_display() -> Optional[subprocess.Popen]:
     """没有 DISPLAY 时启动 Xvfb，返回 Xvfb 进程（已有 DISPLAY 则返回 None）。"""
-    if os.getenv("DISPLAY"):
-        debug(f"使用已有 DISPLAY={os.environ['DISPLAY']}")
-        return None
+    current = os.getenv("DISPLAY")
+    if current:
+        if display_usable(current):
+            debug(f"使用已有 DISPLAY={current}")
+            return None
+        log(f"[!] DISPLAY={current} 不可用，重新启动 Xvfb")
+        os.environ.pop("DISPLAY", None)
 
     xvfb = shutil.which("Xvfb")
     if not xvfb:
@@ -443,12 +457,15 @@ def _kill_pid_file(path: Path, expect: str) -> None:
         pass
 
 
-def close_browser(profile_dir: Optional[Path] = None) -> None:
+def close_browser(
+    profile_dir: Optional[Path] = None, stop_xvfb: bool = True
+) -> None:
     _kill_pid_file(
         runtime_dir() / "chromium.pid",
         str(profile_dir or default_profile_dir()),
     )
-    _kill_pid_file(runtime_dir() / "xvfb.pid", "Xvfb")
+    if stop_xvfb:
+        _kill_pid_file(runtime_dir() / "xvfb.pid", "Xvfb")
     try:
         (runtime_dir() / "cdp_url").unlink()
     except OSError:
@@ -578,36 +595,61 @@ def wait_for_url_any(page, needles, timeout: int) -> Optional[str]:
     return None
 
 
+def is_navigation_error(exc: Exception) -> bool:
+    message = str(exc)
+    return (
+        "Execution context was destroyed" in message
+        or "Cannot find context with specified id" in message
+        or "most likely because of a navigation" in message
+    )
+
+
 def api_user(page) -> Optional[dict]:
     """在页面上下文里调用 user-info；返回用户数据，401 返回 None。"""
-    if not on_credit(page):
-        raise CreditError(f"当前页面不在 credit.linux.do：{page.url}")
+    last_exc = None
+    for attempt in range(3):
+        if not on_credit(page):
+            raise CreditError(f"当前页面不在 credit.linux.do：{page.url}")
+        try:
+            result = page.evaluate(
+                """async () => {
+                  const r = await fetch('/api/v1/oauth/user-info', {
+                    headers: {
+                      'Accept': 'application/json, text/plain, */*',
+                      'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include',
+                    referrer: location.href
+                  });
+                  return {status: r.status, text: await r.text()};
+                }"""
+            )
+        except Exception as exc:  # noqa: BLE001
+            if not is_navigation_error(exc):
+                raise
+            last_exc = exc
+            debug(f"user-info 页面导航中，重试 {attempt + 1}/3")
+            page.wait_for_timeout(1000)
+            continue
 
-    result = page.evaluate(
-        """async () => {
-          const r = await fetch('/api/v1/oauth/user-info', {
-            headers: {
-              'Accept': 'application/json, text/plain, */*',
-              'X-Requested-With': 'XMLHttpRequest'
-            },
-            credentials: 'include',
-            referrer: location.href
-          });
-          return {status: r.status, text: await r.text()};
-        }"""
-    )
-    status = int(result.get("status", 0))
-    text = result.get("text", "")
-    debug(f"user-info HTTP {status}")
+        status = int(result.get("status", 0))
+        text = result.get("text", "")
+        debug(f"user-info HTTP {status}")
 
-    if status == 200:
-        payload = json.loads(text)
-        return payload.get("data")
-    if status == 401:
-        return None
-    if status == 403 and ("Just a moment" in text or "challenge" in text):
-        raise CloudflareBlocked("Cloudflare 拦截了 user-info 请求。")
-    raise CreditError(f"user-info 返回 HTTP {status}：{text[:200]}")
+        if status == 200:
+            payload = json.loads(text)
+            return payload.get("data")
+        if status == 401:
+            return None
+        if status == 403 and ("Just a moment" in text or "challenge" in text):
+            if attempt < 2:
+                debug("user-info 遇到 Cloudflare 403，等待后重试")
+                page.wait_for_timeout(2000)
+                continue
+            raise CloudflareBlocked("Cloudflare 拦截了 user-info 请求。")
+        raise CreditError(f"user-info 返回 HTTP {status}：{text[:200]}")
+
+    raise CreditError(f"页面持续导航，无法读取会话：{last_exc}")
 
 
 def check_session(page) -> Optional[dict]:
@@ -1269,7 +1311,7 @@ def run(args) -> int:
         except Exception as exc:  # noqa: BLE001
             log(f"[!] 连接 Chromium 失败：{exc}")
             log("[*] 清理旧浏览器并重新启动 …")
-            close_browser(profile_dir)
+            close_browser(profile_dir, stop_xvfb=False)
             cdp_url = start_chromium(profile_dir)
             session = stack.enter_context(BrowserSession(cdp_url))
 
